@@ -42,13 +42,13 @@ https://github.com/fedorweems/YouTube/blob/Arduino-Game-V1/ESP8266%20Home%20Auto
 //#define SECRET_SSID "bigtsunami" // Your network SSID (name)
 //#define SECRET_PASS "a0s9uaojerfa90utqk34lt-rkaj908dtu34" // Your network password
 #define SECRET_SSID "bigheat"
-#define SECRET_PASS "8Jg0d3RnQT526wCk"
+#define SECRET_PASS "password"
 //#define SECRET_SSID "MyAP4Me"
 //#define SECRET_PASS "dasisteintest"
 
 #define MQTT_CLIENT_ID "ESP32_GasHeizung_V0.01"
 #define MQTT_USERNAME "heizung"
-#define MQTT_PASSWORD "dasisteintest1808"
+#define MQTT_PASSWORD "password"
 #define MQTT_HOST IPAddress(192, 168, 0, 1)
 #define MQTT_PORT 1883
 
@@ -156,10 +156,10 @@ int wifi_rssi=0;
 const char* ssid     = SECRET_SSID;
 const char* password = SECRET_PASS;
 // Set your Static IP address
-IPAddress local_IP(192, 168, 0, 6);
+IPAddress local_IP(192, 168, 0, 2);
 // Set your Gateway IP address
-IPAddress gateway(192, 168, 0, 126);
-IPAddress subnet(255, 255, 255, 128);
+IPAddress gateway(192, 168, 0, 254);
+IPAddress subnet(255, 255, 255, 0);
 IPAddress primaryDNS(192, 168, 0, 1);   //optional
 IPAddress secondaryDNS(8, 8, 8, 8); //optional
 

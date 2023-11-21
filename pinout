@@ -1,0 +1,21 @@
+
+/*
+youtube.com/watch?v=7h2bE2vNoaY
+                                     A0 |      | D0   GPIO_16       *T4_Boilertemp(16)
+                                    GND |      | D1   GPIO_5        *I2C -LCD, Keypad(5)
+                                     VU |      | D2   GPIO_4        *I2C -LCD, Keypad(4)
+       *T3_Küchetemp(10)    GPIO_10 SD3 |      | D3   GPIO_0        *T0_Kesseltemp(0)
+                    (9)     GPIO_9  SD2 |      | D4   GPIO_2        *T1_Vorlauftemp(2)
+                                    SD1 |      | 3V3
+                                    CMD |      | GND
+                                    SD0 |      | D5   GPIO_14       *Brenner_relais(14)
+                                    CLK |      | D6   GPIO_12       *P_Heizung_pumpe(12)
+                                    GND |      | D7   GPIO_13       *P_Boiler_pumpe(13)
+                                    3V3 |      | D8   GPIO_15       *T2_Aussentemp(15)
+                                     EN |      | D9   GPIO_3  RDX0  (3)
+                                    RST |      | D10  GPIO_1  TDX0  (1)
+                                    GND |      | GND
+                                    Vin |      | 3V3
+
+
+*/

@@ -7,5 +7,5 @@ pipelines:
           enabled: false
         script:
           - git clone --bare git@bitbucket.org:pernc/heizung.git
-          - cd RepoName.git
+          - cd heizung.git
           - git push --mirror git@github.com:cperners/heizung.git

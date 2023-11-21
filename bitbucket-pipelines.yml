@@ -8,4 +8,4 @@ pipelines:
         script:
           - git clone --bare git@bitbucket.org:pernc/heizung.git
           - cd RepoName.git
-          - git push --mirror git@github.com:pernc/heizung.git
+          - git push --mirror git@github.com:cperners/heizung.git

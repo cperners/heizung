@@ -39,8 +39,6 @@ https://github.com/fedorweems/YouTube/blob/Arduino-Game-V1/ESP8266%20Home%20Auto
 //3 seconds WDT
 #define WDT_TIMEOUT 200
 
-//#define SECRET_SSID "bigtsunami" // Your network SSID (name)
-//#define SECRET_PASS "a0s9uaojerfa90utqk34lt-rkaj908dtu34" // Your network password
 #define SECRET_SSID "bigheat"
 #define SECRET_PASS "password"
 //#define SECRET_SSID "MyAP4Me"

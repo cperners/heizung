@@ -194,6 +194,17 @@ long BrennerLaufzeit;
 byte Sommerzeit_EinAus;
 float tvmax,taumin,n;
 
+// V2 Kachelofen-Erkennung (externer Sensor via MQTT)
+// Der Kachelofen ist hydraulisch nicht mit der Heizung verbunden.
+// Seine Temperatur entscheidet nur, ob Raum- oder Aussentemperaturregelung aktiv ist.
+static const char KACHELOFEN_MQTT_TOPIC[] = "/SmartHome/Keller/Heizung/kachelofenTemp";
+float tKachelofen = NAN;
+bool kachelofenAktiv = false;
+unsigned long kachelofenLastUpdate = 0;
+float kachelofenEinTemp = 50.0;
+float kachelofenAusTemp = 40.0;
+const unsigned long kachelofenTimeout = 10UL * 60UL * 1000UL;
+
 unsigned int jumptoDefault = 0;
 char jump = '0';
 #define OS0 0.00           // Offset Temp Sensor 1 (alle Offsets bitte mit allen Temp.Sensoren abgleichen!)
@@ -729,6 +740,7 @@ void Automatik();
 void Boilerbetrieb();
 void Heizungsbetrieb();
 void RoomAnforderungf();
+void updateKachelofenStatus();
 void BoilerAnforderungf();
 void MenuBetriebBoiler();
 void MenuBetriebNurHeizung();
@@ -987,6 +999,7 @@ void setup() {
 ******************************************************************************************************* */
 void loop(){
   unsigned long currentTime;
+  updateKachelofenStatus();
   MischerInit();
   if(WinterBetrieb){
     Automatik();
@@ -2511,6 +2524,32 @@ void RoomAnforderungf(){
   }
 }
 /* *******************************************************************************************************
+                                         Kachelofen Status
+******************************************************************************************************* */
+void updateKachelofenStatus(){
+  const unsigned long now = millis();
+  const bool mqttWertGueltig = (kachelofenLastUpdate != 0) &&
+                               ((unsigned long)(now - kachelofenLastUpdate) <= kachelofenTimeout);
+
+  if(!mqttWertGueltig){
+    // Ohne frischen Kachelofenwert wieder normale Raumregelung verwenden.
+    kachelofenAktiv = false;
+    AussentemperaturRegelung = 0;
+    return;
+  }
+
+  // Hysterese: EIN >= 50 C, AUS <= 40 C; dazwischen Zustand beibehalten.
+  if(!kachelofenAktiv && tKachelofen >= kachelofenEinTemp){
+    kachelofenAktiv = true;
+  }else if(kachelofenAktiv && tKachelofen <= kachelofenAusTemp){
+    kachelofenAktiv = false;
+  }
+
+  AussentemperaturRegelung = kachelofenAktiv ? 1 : 0;
+}
+
+
+/* *******************************************************************************************************
                                          BoilerAnforderung
 ******************************************************************************************************* */
 void BoilerAnforderungf(){
@@ -2745,6 +2784,29 @@ void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties 
 in FHEM:   set MQTT_SERVER publish /SmartHome/Keller/Heizung/setRaumTemp up
            set MQTT_SERVER publish /SmartHome/Keller/Heizung/setRaumTemp down
 */
+  // Kachelofen-Temperatur: eigenes Topic, Payload ist nur die Temperatur (z.B. 65.4).
+  if(strcmp(topic, KACHELOFEN_MQTT_TOPIC) == 0){
+    if(index == 0 && len == total && len > 0 && len < 16){
+      char tempPayload[16];
+      memcpy(tempPayload, payload, len);
+      tempPayload[len] = '\0';
+      char* endPtr = nullptr;
+      float newTemp = strtof(tempPayload, &endPtr);
+      if(endPtr != tempPayload && *endPtr == '\0' && isfinite(newTemp) && newTemp >= -40.0 && newTemp <= 200.0){
+        tKachelofen = newTemp;
+        kachelofenLastUpdate = millis();
+        updateKachelofenStatus();
+        Serial.print("Kachelofen MQTT: ");
+        Serial.print(tKachelofen, 1);
+        Serial.print(" C, aktiv=");
+        Serial.println(kachelofenAktiv ? "JA" : "NEIN");
+      }else{
+        Serial.println("Kachelofen MQTT: ungueltiger Temperaturwert verworfen");
+      }
+    }
+    return;
+  }
+
   mqtt_message++;
   char new_payload[len+1];
   new_payload[len] = '\0';
@@ -2937,6 +2999,7 @@ void onMqttConnect(bool sessionPresent) {
       Serial.println(sessionPresent);
       strcat(subsc,"set");//nun /SmartHome/Keller/Heizung/setRaumTemp
       asyncMqttClient.subscribe(subsc,1);
+      asyncMqttClient.subscribe(KACHELOFEN_MQTT_TOPIC,1);
       //uint16_t packetIdSub = asyncMqttClient.subscribe("/SmartHome/Keller/Heizung/setRaumTemp", 2);
 }
 

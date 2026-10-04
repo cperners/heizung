@@ -206,6 +206,8 @@ unsigned long kachelofenLastUpdate = 0;
 float kachelofenEinTemp = 50.0;
 float kachelofenAusTemp = 40.0;
 const unsigned long kachelofenTimeout = 10UL * 60UL * 1000UL;
+enum RegelungsModus { REGELUNG_AUTO, REGELUNG_RAUM, REGELUNG_AUSSEN };
+RegelungsModus regelungsModus = REGELUNG_AUTO;
 
 unsigned int jumptoDefault = 0;
 char jump = '0';
@@ -2605,20 +2607,27 @@ void updateKachelofenStatus(){
                                ((unsigned long)(now - kachelofenLastUpdate) <= kachelofenTimeout);
 
   if(!mqttWertGueltig){
-    // Ohne frischen Kachelofenwert wieder normale Raumregelung verwenden.
+    // Ohne frischen Kachelofenwert gilt der Ofen als inaktiv.
     kachelofenAktiv = false;
+  }
+
+  // Hysterese nur anwenden, wenn ein frischer MQTT-Wert vorhanden ist.
+  if(mqttWertGueltig){
+    if(!kachelofenAktiv && tKachelofen >= kachelofenEinTemp){
+      kachelofenAktiv = true;
+    }else if(kachelofenAktiv && tKachelofen <= kachelofenAusTemp){
+      kachelofenAktiv = false;
+    }
+  }
+
+  // AUTO folgt dem Kachelofen. RAUM/AUSSEN sind manuelle Service-Overrides.
+  if(regelungsModus == REGELUNG_AUTO){
+    AussentemperaturRegelung = kachelofenAktiv ? 1 : 0;
+  }else if(regelungsModus == REGELUNG_RAUM){
     AussentemperaturRegelung = 0;
-    return;
+  }else{
+    AussentemperaturRegelung = 1;
   }
-
-  // Hysterese: EIN >= 50 C, AUS <= 40 C; dazwischen Zustand beibehalten.
-  if(!kachelofenAktiv && tKachelofen >= kachelofenEinTemp){
-    kachelofenAktiv = true;
-  }else if(kachelofenAktiv && tKachelofen <= kachelofenAusTemp){
-    kachelofenAktiv = false;
-  }
-
-  AussentemperaturRegelung = kachelofenAktiv ? 1 : 0;
 }
 
 
@@ -2989,14 +2998,21 @@ in FHEM:   set MQTT_SERVER publish /SmartHome/Keller/Heizung/setRaumTemp up
         return;
     }
     else if(strcmp(new_payload,"tin")==0){
-        AussentemperaturRegelung = 0;
-        EEPROM.put( EEADDRESS_AUSSENTEMPREGELUNG, AussentemperaturRegelung );
+        regelungsModus = REGELUNG_RAUM;
+        updateKachelofenStatus();
         strcpy(mqtt_payload,"h_tin");
+        return;
     }
     if(strcmp(new_payload,"tau")==0){
-        AussentemperaturRegelung = 1;
-        EEPROM.put( EEADDRESS_AUSSENTEMPREGELUNG, AussentemperaturRegelung );
+        regelungsModus = REGELUNG_AUSSEN;
+        updateKachelofenStatus();
         strcpy(mqtt_payload,"h_tau");
+        return;
+    }
+    if(strcmp(new_payload,"tauto")==0){
+        regelungsModus = REGELUNG_AUTO;
+        updateKachelofenStatus();
+        strcpy(mqtt_payload,"h_tauto");
         return;
     }
     if(strstr(new_payload,"kachelofenEin:") == new_payload){
@@ -3527,7 +3543,10 @@ String processor(const String& var){
   }else if(var == "KACHELOFENSTATUS"){
     return kachelofenAktiv ? "AKTIV" : "INAKTIV";
   }else if(var == "REGELUNGSART"){
-    return AussentemperaturRegelung ? "AUSSENTEMPERATUR" : "RAUMTEMPERATUR";
+    if(regelungsModus == REGELUNG_AUTO){
+      return AussentemperaturRegelung ? "AUTO / AUSSENTEMPERATUR" : "AUTO / RAUMTEMPERATUR";
+    }
+    return regelungsModus == REGELUNG_RAUM ? "MANUELL / RAUMTEMPERATUR" : "MANUELL / AUSSENTEMPERATUR";
   }else if(var == "KACHELOFENEIN"){
     return String(kachelofenEinTemp, 1);
   }else if(var == "KACHELOFENAUS"){

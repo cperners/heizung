@@ -1044,9 +1044,15 @@ void setup() {
       request->send(400, "text/plain", "Parameter ein und aus erforderlich");
       return;
     }
-    float newEin = request->getParam("ein")->value().toFloat();
-    float newAus = request->getParam("aus")->value().toFloat();
-    if(!isfinite(newEin) || !isfinite(newAus) ||
+    String einText = request->getParam("ein")->value();
+    String ausText = request->getParam("aus")->value();
+    char* einEnd = nullptr;
+    char* ausEnd = nullptr;
+    float newEin = strtof(einText.c_str(), &einEnd);
+    float newAus = strtof(ausText.c_str(), &ausEnd);
+    if(einEnd == einText.c_str() || *einEnd != '\0' ||
+       ausEnd == ausText.c_str() || *ausEnd != '\0' ||
+       !isfinite(newEin) || !isfinite(newAus) ||
        newEin < 10.0 || newEin > 150.0 ||
        newAus < 0.0 || newAus > 140.0 ||
        newAus >= newEin){

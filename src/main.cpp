@@ -110,7 +110,9 @@ https://github.com/fedorweems/YouTube/blob/Arduino-Game-V1/ESP8266%20Home%20Auto
 #define EEADDRESS_TAUMIN 120
 #define EEADDRESS_NN 128
 #define EEADDRESS_AUSSENTEMPREGELUNG 136
-#define EE_SIZE EEADDRESS_AUSSENTEMPREGELUNG+8
+#define EEADDRESS_KACHELOFEN_EIN 144
+#define EEADDRESS_KACHELOFEN_AUS 152
+#define EE_SIZE EEADDRESS_KACHELOFEN_AUS+8
 
 
 #define KESSEL_MIN_TEMP 30.0
@@ -865,6 +867,24 @@ void setup() {
   EEPROM.get( EEADDRESS_AUSSENTEMPREGELUNG, AussentemperaturRegelung);
   Serial.println( AussentemperaturRegelung, 1 );
   Serial.print("...\n");
+
+  EEPROM.get( EEADDRESS_KACHELOFEN_EIN, kachelofenEinTemp );
+  EEPROM.get( EEADDRESS_KACHELOFEN_AUS, kachelofenAusTemp );
+  // Neue EEPROM-Felder koennen beim ersten Start uninitialisiert sein.
+  if(!isfinite(kachelofenEinTemp) || !isfinite(kachelofenAusTemp) ||
+     kachelofenEinTemp < 10.0 || kachelofenEinTemp > 150.0 ||
+     kachelofenAusTemp < 0.0 || kachelofenAusTemp > 140.0 ||
+     kachelofenAusTemp >= kachelofenEinTemp){
+    kachelofenEinTemp = 50.0;
+    kachelofenAusTemp = 40.0;
+    EEPROM.put( EEADDRESS_KACHELOFEN_EIN, kachelofenEinTemp );
+    EEPROM.put( EEADDRESS_KACHELOFEN_AUS, kachelofenAusTemp );
+    EEPROM.commit();
+  }
+  Serial.print("Kachelofen EIN: ");
+  Serial.println(kachelofenEinTemp, 1);
+  Serial.print("Kachelofen AUS: ");
+  Serial.println(kachelofenAusTemp, 1);
   EEPROM.get( EEADDRESS_TAG, TagBegin );
   TagBeginHr = (int)(TagBegin);
   TagBeginMi = (int)((TagBegin - TagBeginHr)*100);
@@ -2924,6 +2944,38 @@ in FHEM:   set MQTT_SERVER publish /SmartHome/Keller/Heizung/setRaumTemp up
         AussentemperaturRegelung = 1;
         EEPROM.put( EEADDRESS_AUSSENTEMPREGELUNG, AussentemperaturRegelung );
         strcpy(mqtt_payload,"h_tau");
+        return;
+    }
+    if(strstr(new_payload,"kachelofenEin:") == new_payload){
+        char* teilstr = strchr(new_payload, ':');
+        float tempTemp = atof(teilstr+1);
+        if(isfinite(tempTemp) && tempTemp >= 10.0 && tempTemp <= 150.0 && tempTemp > kachelofenAusTemp){
+          kachelofenEinTemp = tempTemp;
+          EEPROM.put( EEADDRESS_KACHELOFEN_EIN, kachelofenEinTemp );
+          EEPROM.commit();
+          updateKachelofenStatus();
+          strcpy(mqtt_payload,"h_kof_ein");
+          Serial.print("Kachelofen EIN neu: ");
+          Serial.println(kachelofenEinTemp, 1);
+        }else{
+          Serial.println("MQTT kachelofenEin: ungueltiger Wert");
+        }
+        return;
+    }
+    if(strstr(new_payload,"kachelofenAus:") == new_payload){
+        char* teilstr = strchr(new_payload, ':');
+        float tempTemp = atof(teilstr+1);
+        if(isfinite(tempTemp) && tempTemp >= 0.0 && tempTemp <= 140.0 && tempTemp < kachelofenEinTemp){
+          kachelofenAusTemp = tempTemp;
+          EEPROM.put( EEADDRESS_KACHELOFEN_AUS, kachelofenAusTemp );
+          EEPROM.commit();
+          updateKachelofenStatus();
+          strcpy(mqtt_payload,"h_kof_aus");
+          Serial.print("Kachelofen AUS neu: ");
+          Serial.println(kachelofenAusTemp, 1);
+        }else{
+          Serial.println("MQTT kachelofenAus: ungueltiger Wert");
+        }
         return;
     }
     if(strstr(new_payload,"newRoomTemp")){ //Raumtemperatur per mqtt setzen

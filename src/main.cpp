@@ -394,6 +394,23 @@ const char index_html[] PROGMEM = R"rawliteral(
   <p>
   </section>
   <section class="layout">
+  <div>
+    <span class="dht-labels">Kachelofen</span>
+    <span id="tkachelofen">%TKACHELOFEN%</span>
+    <sup class="units">&deg;C</sup>
+  </div>
+  <div>Kachelofen: <strong>%KACHELOFENSTATUS%</strong></div>
+  <div>Regelung: <strong>%REGELUNGSART%</strong></div>
+  <div>
+    <form action="/kachelofen" method="get">
+      EIN &deg;C <input name="ein" type="number" min="10" max="150" step="0.5" value="%KACHELOFENEIN%" style="width:70px">
+      AUS &deg;C <input name="aus" type="number" min="0" max="140" step="0.5" value="%KACHELOFENAUS%" style="width:70px">
+      <input type="submit" value="Speichern">
+    </form>
+  </div>
+  </section>
+  <p>
+  <section class="layout">
   <div>WLAN-SSID: <span id="wifi_rssi">%WIFISSID%</span></div>
   <div>WLAN-Signal: <span id="wifi_rssi">%WIFIRSSI%</span></div>
   <div><input type="range" onchange="updateSliderTimer(this)" id="wifi_rssis" min="-100" max="-10" value="%WIFIRSSI%" step="1" class="slider2"></div>
@@ -490,6 +507,17 @@ setInterval(function ( ) {
     }
   };
   xhttp.open("GET", "/tboiler", true);
+  xhttp.send();
+}, 10000 ) ;
+
+setInterval(function ( ) {
+  var xhttp = new XMLHttpRequest();
+  xhttp.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      document.getElementById("tkachelofen").innerHTML = this.responseText;
+    }
+  };
+  xhttp.open("GET", "/tkachelofen", true);
   xhttp.send();
 }, 10000 ) ;
 </script>
@@ -1005,6 +1033,31 @@ void setup() {
   // Route for root / web page
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
     request->send_P(200, "text/html", index_html, processor);
+  });
+  server.on("/tkachelofen", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send(200, "text/plain", readTemperature(tKachelofen));
+  });
+  server.on("/kachelofen", HTTP_GET, [](AsyncWebServerRequest *request){
+    if(!request->hasParam("ein") || !request->hasParam("aus")){
+      request->send(400, "text/plain", "Parameter ein und aus erforderlich");
+      return;
+    }
+    float newEin = request->getParam("ein")->value().toFloat();
+    float newAus = request->getParam("aus")->value().toFloat();
+    if(!isfinite(newEin) || !isfinite(newAus) ||
+       newEin < 10.0 || newEin > 150.0 ||
+       newAus < 0.0 || newAus > 140.0 ||
+       newAus >= newEin){
+      request->send(400, "text/plain", "Ungueltige Kachelofen-Schaltschwellen");
+      return;
+    }
+    kachelofenEinTemp = newEin;
+    kachelofenAusTemp = newAus;
+    EEPROM.put( EEADDRESS_KACHELOFEN_EIN, kachelofenEinTemp );
+    EEPROM.put( EEADDRESS_KACHELOFEN_AUS, kachelofenAusTemp );
+    EEPROM.commit();
+    updateKachelofenStatus();
+    request->redirect("/");
   });
   // Start ElegantOTA
   AsyncElegantOTA.begin(&server);
@@ -3469,6 +3522,16 @@ String processor(const String& var){
     return readTemperature(tBoiler);
   }else if(var == "TAUSSEN"){
     return readTemperature(tAussen);
+  }else if(var == "TKACHELOFEN"){
+    return readTemperature(tKachelofen);
+  }else if(var == "KACHELOFENSTATUS"){
+    return kachelofenAktiv ? "AKTIV" : "INAKTIV";
+  }else if(var == "REGELUNGSART"){
+    return AussentemperaturRegelung ? "AUSSENTEMPERATUR" : "RAUMTEMPERATUR";
+  }else if(var == "KACHELOFENEIN"){
+    return String(kachelofenEinTemp, 1);
+  }else if(var == "KACHELOFENAUS"){
+    return String(kachelofenAusTemp, 1);
   }else if(var == "WIFIRSSI"){
     return readValue(WiFi.RSSI());
   }else if(var == "WIFISSID"){

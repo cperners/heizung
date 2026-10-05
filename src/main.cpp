@@ -4,9 +4,6 @@
 //ende updates
 
 /*
-https://github.com/radames/NTP_RTC_Sync/blob/master/NTP_RTC_Sync.ino
-https://github.com/radames/NTP_RTC_Sync
-https://github.com/JChristensen/Timezone/blob/master/examples/HardwareRTC/HardwareRTC.ino
 https://wiki.ta.co.at/Heizkreisregelung_(Funktion)
 2020-01-24 chckBoiler() geändert - Kesseltemperatur war kleiner als Boilertemperatur
            chckKessel() geändert - nKesselDiff um beim BoilerAufheizen eine höhere Temperatur zu haben
@@ -19,12 +16,10 @@ https://github.com/fedorweems/YouTube/blob/Arduino-Game-V1/ESP8266%20Home%20Auto
 #include <WiFi.h>
 #include <ESP32Ping.h>
 #include <esp_task_wdt.h>
-#include <RTClib.h> //RTC Clock einbinden
+#include <time.h> // Clock einbinden
 #include <AsyncTCP.h>
 #include <AsyncMqttClient.h>
 #include <LiquidCrystal_I2C.h> //This library you can add via Include Library > Manage Library >
-#include <NTPClient.h>
-#include <WiFiUdp.h>
 #include <Wire.h>
 #include <OneWire.h> //fuer DS18B20
 #include <EEPROM.h>
@@ -33,20 +28,21 @@ https://github.com/fedorweems/YouTube/blob/Arduino-Game-V1/ESP8266%20Home%20Auto
 #include <Timezone.h>
 #include <Update.h>
 #include <ArduinoJson.h>
+
 //define externe Mischersteuerung per I2c
 #define EXMISCHER
 
 //3 seconds WDT
 #define WDT_TIMEOUT 200
 
-#define SECRET_SSID "bigheat"
-#define SECRET_PASS "password"
+#include "secrets.h"
+
 //#define SECRET_SSID "MyAP4Me"
 //#define SECRET_PASS "dasisteintest"
 
-#define MQTT_CLIENT_ID "ESP32_GasHeizung_V0.01"
-#define MQTT_USERNAME "heizung"
-#define MQTT_PASSWORD "password"
+#define MQTT_CLIENT_ID "ESP32_Heizung_Test"
+
+
 #define MQTT_HOST IPAddress(192, 168, 0, 1)
 #define MQTT_PORT 1883
 
@@ -75,7 +71,7 @@ https://github.com/fedorweems/YouTube/blob/Arduino-Game-V1/ESP8266%20Home%20Auto
 #define ioextender0_addr 0x22
 //A0-A1-A2 dip switch to off position
 
-#define MQTT_TEXT "/SmartHome/Keller/Heizung/"
+#define MQTT_TEXT "/SmartHome/Test/Heizung/"
 /*  https://haus-automatisierung.com/nodered/2017/12/13/node-red-tutorial-reihe-part-4-verbindung-fhem.html */
 
 #define MENUPAGE_TEMPERATUR 1 ... 6
@@ -140,11 +136,10 @@ const float eetaumin = 15.0; //MaxAussentemperatur bei AussentemperaturRegelung
 const float een = 1.9; //Kurvenfaktor bei AussentemperaturRegelung
 const int eeAuTempRegel = 1; 
 /* *******************************************************************************************************
-                                         Zeit via RTC
+                                         Zeit via NTP
 ******************************************************************************************************* */
-RTC_DS1307 rtc;
 byte dayticker_hr=0;
-
+bool ntpTimeValid = false;
 /* *******************************************************************************************************
                                          Netzwerk
 ******************************************************************************************************* */
@@ -199,7 +194,7 @@ float tvmax,taumin,n;
 // V2 Kachelofen-Erkennung (externer Sensor via MQTT)
 // Der Kachelofen ist hydraulisch nicht mit der Heizung verbunden.
 // Seine Temperatur entscheidet nur, ob Raum- oder Aussentemperaturregelung aktiv ist.
-static const char KACHELOFEN_MQTT_TOPIC[] = "/SmartHome/Keller/Heizung/kachelofenTemp";
+static const char KACHELOFEN_MQTT_TOPIC[] = "/SmartHome/Test/Heizung/kachelofenTemp";
 float tKachelofen = NAN;
 bool kachelofenAktiv = false;
 unsigned long kachelofenLastUpdate = 0;
@@ -243,97 +238,60 @@ int mqtt_message=0;
 /* *******************************************************************************************************
                                                OTA
 ******************************************************************************************************* */
-char TimeString[20];
+char TimeString[32];
 AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
 
 const char index_html[] PROGMEM = R"rawliteral(
 <!DOCTYPE HTML><html>
 <head>
+  <meta charset="utf-8">
   <title>ESP Web Server</title>
-  <meta http-equiv="Refresh" content="5">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="data:,">
   <style>
-  html {
-    font-family: Arial, Helvetica, sans-serif;
-    text-align: center;
-  }
-  h1 {
-    font-size: 1.8rem;
-    color: white;
-    font-weight: bold;
-  }
-  h2{
-    font-size: 1.5rem;
-    font-weight: normal;
-    color: white;
-  }
-  h3{
-    font-size: 1.2rem;
-    font-weight: lighter;
-    color: #e7e7e7;
-  }
-  .topnav {
-    overflow: hidden;
-    background-color: #143642;
-  }
-  body {
-    margin: 0;
-  }
-  .content {
-    padding: 30px;
-    max-width: 600px;
-    min-width: 300px;
-    margin: 0 auto;
-  }
-  .card {
-    background-color: #F8F7F9;;
-    box-shadow: 2px 2px 12px 1px rgba(140,140,140,.5);
-    padding-top:10px;
-    padding-bottom:20px;
-  }
-  .button {
-    padding: 13px 40px;
-    font-size: 22px;
-    text-align: center;
-    outline: none;
-    color: #fff;
-    background-color: #0f8b8d;
-    border: none;
-    border-radius: 5px;
-    -webkit-touch-callout: none;
-    -webkit-user-select: none;
-    -khtml-user-select: none;
-    -moz-user-select: none;
-    -ms-user-select: none;
-    user-select: none;
-    -webkit-tap-highlight-color: rgba(0,0,0,0);
-   }
-   /*.button:hover {background-color: #0f8b8d}*/
-   .button:active {
-     background-color: #0f8b8d;
-     box-shadow: 2 2px #CDCDCD;
-     transform: translateY(2px);
-   }
-   .state {
-     font-size: 1.5rem;
-     color:#8c8c8c;
-     font-weight: bold;
-   }
-   p { font-size: 2.6rem; }
-    .units { font-size: 1.2rem; }
-    .dht-labels{
-      font-size: 1.5rem;
-      vertical-align:middle;
-      padding-bottom: 15px;
-   }
-   .layout {
-  display: grid;
-  grid-template-rows: repeat(auto-fit, 2fr);
-  grid-template-columns: repeat(5, 2fr);
-  gap: 12px 8px;
-  }
+/* Darstellung der Heizungsuebersicht */
+* { box-sizing: border-box; }
+html { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #20343c; text-align: left; }
+body { margin: 0; background: #f1f5f6; line-height: 1.5; }
+.topnav { background: #163b45; padding: 28px 24px; border-bottom: 4px solid #36b6a5; }
+.topnav h1 { max-width: 1120px; margin: 0 auto; font-size: clamp(1.2rem, 3vw, 1.8rem); line-height: 1.65; color: white; }
+.topnav hr { border: 0; border-top: 1px solid #ffffff30; margin: 10px 0; }
+.layout { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; max-width: 1168px; margin: 20px auto; padding: 0 24px; }
+.layout > p, body > p { display: none; }
+.layout > div { min-width: 0; padding: 20px; border: 1px solid #dce5e8; border-radius: 16px; background: white; box-shadow: 0 4px 16px #163b4508; overflow-wrap: anywhere; }
+.layout > .content { padding: 0; }
+.content { margin: 0; max-width: none; }
+.card { padding: 22px; border-radius: 16px; background: white; box-shadow: none; }
+h3 { margin: 0 0 12px; color: #20343c; font-size: 1rem; font-weight: 600; }
+.state { margin: 12px 0; font-size: 1.1rem; color: #536b74; }
+.state span { display: inline-block; padding: 4px 12px; border-radius: 20px; background: #edf3f5; color: #20343c; font-weight: 700; }
+p { font-size: 1rem; margin: 14px 0; }
+.dht-labels { display: block; font-size: .9rem; color: #607681; padding-bottom: 8px; }
+#troom, #taussen, #tkessel, #tvorlauf, #tboiler, #tkachelofen { font-size: 1.8rem; font-weight: 700; letter-spacing: -.04em; color: #163b45; }
+.units { font-size: .9rem; color: #607681; }
+strong { display: block; margin-top: 8px; color: #14796c; font-size: 1rem; }
+.button, input[type="submit"] { border: 0; border-radius: 9px; background: #14796c; color: white; padding: 10px 18px; font: inherit; font-weight: 600; cursor: pointer; }
+.button:hover, input[type="submit"]:hover { background: #105f55; }
+button:focus-visible, input:focus-visible { outline: 3px solid #36b6a5; outline-offset: 3px; }
+input[type="number"] { border: 1px solid #bdcdd3; border-radius: 7px; padding: 8px; margin: 5px 0 10px; font: inherit; }
+input[type="range"] { width: 100%; accent-color: #14796c; }
+form { line-height: 2; font-size: .9rem; }
+@media (max-width: 540px) { .layout { grid-template-columns: 1fr; padding: 0 16px; gap: 12px; margin: 16px auto; } .topnav { padding: 20px 16px; } }
+
+/* Bedientasten fuer die Kachelofen-Schaltschwellen */
+.threshold-form { line-height: 1.5; }
+.threshold-form label { display: block; margin: 18px 0 8px; font-size: .85rem; font-weight: 600; color: #536b74; }
+.threshold-row { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; gap: 8px; align-items: center; }
+.threshold-row button { height: 44px; border: 1px solid #b9d7d2; border-radius: 9px; background: #eaf5f2; color: #126a5f; font: inherit; font-size: 1.4rem; cursor: pointer; }
+.threshold-row button:hover { background: #d8eee7; }
+.threshold-value { display: flex; align-items: center; justify-content: center; gap: 4px; }
+.threshold-value input[type="number"] { width: 100%; min-width: 0; max-width: 86px; margin: 0; padding: 8px 0; border: 0; background: transparent; text-align: center; font-size: 1.6rem; font-weight: 700; color: #163b45; appearance: textfield; -moz-appearance: textfield; }
+.threshold-value input::-webkit-inner-spin-button, .threshold-value input::-webkit-outer-spin-button { appearance: none; margin: 0; }
+.threshold-value span { color: #607681; font-size: .9rem; }
+.threshold-hint { font-size: .78rem; color: #607681; margin: 16px 0; }
+.threshold-save { width: 100%; padding: 12px; border: 0; border-radius: 9px; background: #14796c; color: white; font: inherit; font-weight: 600; cursor: pointer; }
+.threshold-save:disabled { opacity: .5; cursor: default; }
   </style>
 <title>ESP32 Heizungs-Server</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -404,11 +362,36 @@ const char index_html[] PROGMEM = R"rawliteral(
   <div>Kachelofen: <strong>%KACHELOFENSTATUS%</strong></div>
   <div>Regelung: <strong>%REGELUNGSART%</strong></div>
   <div>
-    <form action="/kachelofen" method="get">
-      EIN &deg;C <input name="ein" type="number" min="10" max="150" step="0.5" value="%KACHELOFENEIN%" style="width:70px">
-      AUS &deg;C <input name="aus" type="number" min="0" max="140" step="0.5" value="%KACHELOFENAUS%" style="width:70px">
-      <input type="submit" value="Speichern">
-    </form>
+    <form class="threshold-form" action="/kachelofen" method="get">
+  <h3>Kachelofen-Schaltschwellen</h3>
+  <label for="threshold-ein">Aktiv ab</label>
+  <div class="threshold-row">
+    <button type="button" aria-label="Einschalttemperatur senken" onclick="adjustThreshold('threshold-ein', -1)">&minus;</button>
+    <div class="threshold-value"><input id="threshold-ein" name="ein" type="number" min="10" max="150" step="0.5" value="%KACHELOFENEIN%" readonly required><span>&deg;C</span></div>
+    <button type="button" aria-label="Einschalttemperatur erhöhen" onclick="adjustThreshold('threshold-ein', 1)">+</button>
+  </div>
+  <label for="threshold-aus">Inaktiv bei oder unter</label>
+  <div class="threshold-row">
+    <button type="button" aria-label="Ausschalttemperatur senken" onclick="adjustThreshold('threshold-aus', -1)">&minus;</button>
+    <div class="threshold-value"><input id="threshold-aus" name="aus" type="number" min="0" max="140" step="0.5" value="%KACHELOFENAUS%" readonly required><span>&deg;C</span></div>
+    <button type="button" aria-label="Ausschalttemperatur erhöhen" onclick="adjustThreshold('threshold-aus', 1)">+</button>
+  </div>
+  <p class="threshold-hint" id="threshold-hint" aria-live="polite">Änderungen werden erst mit Speichern übernommen.</p>
+  <button class="threshold-save" id="threshold-save" type="submit">Schaltschwellen speichern</button>
+</form>
+<script>
+function adjustThreshold(id, direction) {
+  const field = document.getElementById(id);
+  if (direction > 0) field.stepUp(); else field.stepDown();
+  const ein = document.getElementById('threshold-ein').valueAsNumber;
+  const aus = document.getElementById('threshold-aus').valueAsNumber;
+  const valid = Number.isFinite(ein) && Number.isFinite(aus) && aus < ein;
+  document.getElementById('threshold-save').disabled = !valid;
+  document.getElementById('threshold-hint').textContent = valid
+    ? 'Änderungen werden erst mit Speichern übernommen.'
+    : 'Die Ausschalttemperatur muss niedriger als die Einschalttemperatur sein.';
+}
+</script>
   </div>
   </section>
   <p>
@@ -530,23 +513,20 @@ setInterval(function ( ) {
                                                NTP
 ******************************************************************************************************* */
 //NTPClient
-#define Z_DIFF 2 //bei Zeitdifferenz von 2 Sekunden NTP zu RTC updaten
 //GMT Time Zone with sign
 #define GMT_TIME_ZONE +1
-//Force RTC update and store on EEPROM
+
 //change this to a random number between 0-255 to force time update
-#define FORCE_RTC_UPDATE 27
 #define NTP_UPDATE 30000
 #define NTP_UPDATE_HOUR 3
 
 //closest NTP Server
 //#define NTP_SERVER "0.at.pool.ntp.org"
-#define NTP_SERVER "192.168.0.1"
+#define NTP_SERVER1 "192.168.0.1"
+#define NTP_SERVER2 "0.at.pool.ntp.org"
+#define NTP_SERVER3 "1.at.pool.ntp.org"
 const long utcOffsetInSeconds = 3600;
 char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
-// Define NTP Client to get time
-WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP, NTP_SERVER, GMT_TIME_ZONE*utcOffsetInSeconds, 60000);
 unsigned long timeUpdated = 0;
 bool set2myuhr=false;
 byte myhours=0;
@@ -739,7 +719,6 @@ void onMqttSubscribe(uint16_t packetId, uint8_t qos);
 void connectToMqtt();
 void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total);
 void connectToWifi();
-void rtcconnect();
 void OneWireReset(int Pin);
 void OneWireOutByte(int Pin, byte d);
 byte OneWireInByte(int Pin);
@@ -989,14 +968,18 @@ void setup() {
    Serial.println("*************************************************");
    Serial.println("\n\n\n");
    // Configures static IP address
-  if (!WiFi.config(local_IP, gateway, subnet, primaryDNS, secondaryDNS)) {
-    Serial.println("STA Failed to configure");
-  }
+//  if (!WiFi.config(local_IP, gateway, subnet, primaryDNS, secondaryDNS)) {
+//    Serial.println("STA Failed to configure");
+//  }
    Serial.print("Connecting to :");
    Serial.println(ssid);
    WiFi.onEvent(WiFiEvent);
    WiFi.mode(WIFI_STA);
    WiFi.begin(ssid, password);
+   configTime(0, 0,
+           NTP_SERVER1,
+           NTP_SERVER2,
+           NTP_SERVER3);
    Serial.println("");
    Serial.println("WiFi connected");
    Serial.println("IP address: ");
@@ -1025,7 +1008,7 @@ void setup() {
    asyncMqttClient.onMessage(onMqttMessage);
    asyncMqttClient.setServer(MQTT_HOST,MQTT_PORT);
    
-   timeClient.begin();
+
    timer0_time.start();
    timer1_2lcd.start();
    timer2_ntp.start();
@@ -1033,9 +1016,19 @@ void setup() {
   serial_clear_screen();
   initWebSocket();
   // Route for root / web page
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send_P(200, "text/html", index_html, processor);
-  });
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+  String page = FPSTR(index_html);
+  const char* placeholders[] = {
+    "TimeString", "MQTTUPDATE", "HEIZUNGSPUMPE", "BOILERPUMPE",
+    "TROOM", "TAUSSEN", "TKESSEL", "TVORLAUF", "TBOILER",
+    "TKACHELOFEN", "KACHELOFENSTATUS", "REGELUNGSART",
+    "KACHELOFENEIN", "KACHELOFENAUS", "WIFISSID", "WIFIRSSI"
+  };
+  for (const char* name : placeholders) {
+    page.replace(String("%") + name + "%", processor(String(name)));
+  }
+  request->send(200, "text/html; charset=utf-8", page);
+});
   server.on("/tkachelofen", HTTP_GET, [](AsyncWebServerRequest *request){
     request->send(200, "text/plain", readTemperature(tKachelofen));
   });
@@ -1079,6 +1072,12 @@ void setup() {
                                          MAIN LOOP
 ******************************************************************************************************* */
 void loop(){
+  static unsigned long lastWsCleanup = 0;
+    const unsigned long wsNow = millis();
+    if (wsNow - lastWsCleanup >= 1000UL) {
+      lastWsCleanup = wsNow;
+      ws.cleanupClients();
+    }
   unsigned long currentTime;
   updateKachelofenStatus();
   MischerInit();
@@ -1103,6 +1102,7 @@ void loop(){
   }
   if(connect2mqtt){
     connect2mqtt=false;
+    Serial.println("MQTT-Verbindungsversuch");
     asyncMqttClient.connect();
   }
   if(set2myuhr){
@@ -1117,9 +1117,6 @@ void loop(){
   uptime();//um zu wissen, wie lange der Arduino durchläuft
   KeyPad();
   Serial_Read();
-  if (!rtc.isrunning()){
-    rtcconnect(); 
-  }
   currentTime = millis();
   esp_task_wdt_reset(); //watchdog Zeit rücksetzen
   if(readSensor == false){
@@ -1150,7 +1147,9 @@ else {sensorDS1820_read(bWhichSensor);} //ds_neu
       readSensor = false;
       if (wait_for_connect>0){
         wait_for_connect--;
-        if(!MenuPage)Serial.println((String)timeClient.getEpochTime()+", "+timeClient.getFormattedTime());
+        if (!MenuPage) {
+          Serial.printf("Zeit: %s\n", TimeString);
+        }
       }
       if (jumptoDefault){
         if (jumptoDefault==1){
@@ -1481,20 +1480,12 @@ void checkEingabe() {
           lcd.print(i_char);
           break;
         case 13:
-          if(Sommerzeit_EinAus && !i_char){
-              if (summertime_EU( myyear, mymonth, myday, myhours, GMT_TIME_ZONE)==true){
-                myhours--;
-              }
-          }
-          if(!Sommerzeit_EinAus && i_char){
-              if (summertime_EU( myyear, mymonth, myday, myhours, GMT_TIME_ZONE)==true){
-                myhours++;
-              }
-          }
-          Sommerzeit_EinAus=i_char;
-          EEPROM.put(EEADDRESS_SOMMERZEIT_EINAUS, i_char);
+          Sommerzeit_EinAus = (i_char != 0);
+          EEPROM.put(EEADDRESS_SOMMERZEIT_EINAUS, Sommerzeit_EinAus);
+          ntpupdate();
+          Schaltuhr();
           lcd.print(" ->");
-          lcd.print(i_char);
+          lcd.print(Sommerzeit_EinAus);
           break;
         case 18:
           EEPROM.put(EEADDRESS_AUSSENTEMPREGELUNG, i_char);
@@ -1839,7 +1830,6 @@ void Time2LCD(){
     lcd.printf("H%ld A%c %s %d",BrennerLaufzeit,Betriebsart,mqtt_payload,mqtt_message );
     lcd.setCursor(0, 2);
     lcd.printf("UpdTime:%ld, wr:%d",timeUpdated,wifi_retry);
-    if(rtc.isrunning()){sprintf(line0, "RTC OK");}else{sprintf(line0, "NO RTC");}
     lcd.setCursor(0, 3);
     lcd.print(line0);
     lcd.setCursor(8,3);
@@ -1872,16 +1862,17 @@ void MenuSommerzeitEinAus(){
 /* *******************************************************************************************************
                                          Schaltuhr
 ******************************************************************************************************* */
-void Schaltuhr(){
-  //Tag-Nacht Betrieb)
-  long mytime = (100*myhours)+myminutes;
-  long t_begin = (100*TagBeginHr)+TagBeginMi;
-  long t_ende = (100*NachtBeginHr)+NachtBeginMi;
-  if (mytime > t_begin && mytime < t_ende){
-    daynight='D';
-  }else{
-    daynight='N';
+void Schaltuhr() {
+  if (!ntpTimeValid) {
+    return;
   }
+
+  const long mytime = 100L * myhours + myminutes;
+  const long t_begin = 100L * TagBeginHr + TagBeginMi;
+  const long t_ende = 100L * NachtBeginHr + NachtBeginMi;
+
+  // Bisherige Grenzen des Zeitprogramms beibehalten.
+  daynight = (mytime > t_begin && mytime < t_ende) ? 'D' : 'N';
 }
 /* *******************************************************************************************************
                                          mytime update - every seconds
@@ -1889,23 +1880,21 @@ void Schaltuhr(){
 void setmyuhr(){
   set2myuhr=true;
 }
-void myuhr(){
-  mysecunds++;
-  if (mysecunds==60){
-    myminutes++;
-    mysecunds=0;
-    ntpupdate();
-    Schaltuhr();
+void myuhr() {
+  ntpupdate();
+  Schaltuhr();
+
+  // Vorhandene Brenner-Laufzeitzählung beibehalten.
+  if (BrennerRelais) {
+    brsecunds++;
   }
-  if (myminutes==60){myhours++; myminutes=0;}
-  if (myhours==24){myday++; myweekday++;myhours=0;}
-  if (myweekday==7){ntpupdate(); Schaltuhr();}
-  if(BrennerRelais==true){brsecunds++;}
-  if (brsecunds==60){brminutes++; brsecunds=0;}
-  if (brminutes==60){brhours++; brminutes=0;}
-  if (brhours%2 == 0){
-  //  EEPROM.put(EEADDRESS_BR_LAUFZEIT, brhours);
-  //  EEPROM.commit();
+  if (brsecunds >= 60) {
+    brminutes += brsecunds / 60;
+    brsecunds %= 60;
+  }
+  if (brminutes >= 60) {
+    brhours += brminutes / 60;
+    brminutes %= 60;
   }
 }
 /* *******************************************************************************************************
@@ -1921,44 +1910,62 @@ void dayticker(){
   previousTime_mqtt=millis();//mqtt neu starten
 }
 /* *******************************************************************************************************
-                                         NTP update + RTC check if connected
+                                         NTP update
 ******************************************************************************************************* */
 void ntpupdate() {
-  long actualTime=0;
-  unsigned int differenz = Z_DIFF;
-  DateTime now;
-   if (!rtc.isrunning()) {
-     rtc.begin();
-   } 
-   now = rtc.now();
-  //}
-  if(timeClient.update()){//if 20200204
-    actualTime = timeClient.getEpochTime();
-    if ((now.unixtime()<(actualTime-differenz)) || (now.unixtime()>(actualTime+differenz))){
-       rtc.adjust(DateTime(actualTime));
-      timeUpdated++;
+  const time_t utcTime = time(nullptr);
+
+  if (utcTime < static_cast<time_t>(1577836800UL)) {
+    ntpTimeValid = false;
+    snprintf(TimeString, sizeof(TimeString), "NTP nicht synchron");
+    return;
+  }
+
+  if (!ntpTimeValid) {
+    timeUpdated++;
+  }
+  ntpTimeValid = true;
+
+  time_t localTime =
+      utcTime + GMT_TIME_ZONE * utcOffsetInSeconds;
+  struct tm calendar = {};
+  if (gmtime_r(&localTime, &calendar) == nullptr) {
+    return;
+  }
+
+  // Sommerzeit auf die Normalzeit anwenden, danach Datum neu berechnen.
+  if (Sommerzeit_EinAus &&
+      summertime_EU(calendar.tm_year + 1900,
+                    calendar.tm_mon + 1,
+                    calendar.tm_mday,
+                    calendar.tm_hour,
+                    GMT_TIME_ZONE)) {
+    localTime += 3600;
+    if (gmtime_r(&localTime, &calendar) == nullptr) {
+      return;
     }
   }
-  myhours = now.hour();
-  myminutes = now.minute();
-  mysecunds = now.second();
-  myday = now.day();
-  mymonth = now.month();
-  myyear = now.year();
-  myweekday = now.dayOfTheWeek();
-  if(summertime_EU( myyear, mymonth, myday, myhours, GMT_TIME_ZONE) && Sommerzeit_EinAus)myhours++;
-  char tempString[20];
-  char dd=':';
-  if(now.second()%2){dd=' ';}
-  sprintf(tempString, "%s, %02d:%02d%c%02d", daysOfTheWeek[myweekday],now.hour(), now.minute(), dd, now.second());
-  sprintf(TimeString, "%s, %02d:%02d%c%02d", daysOfTheWeek[myweekday],now.hour(), now.minute(), dd, now.second());
-  if(!MenuPage){
+
+  myyear = calendar.tm_year + 1900;
+  mymonth = calendar.tm_mon + 1;
+  myday = calendar.tm_mday;
+  myweekday = calendar.tm_wday;
+  myhours = calendar.tm_hour;
+  myminutes = calendar.tm_min;
+  mysecunds = calendar.tm_sec;
+
+  const char dd = (mysecunds % 2) ? ' ' : ':';
+  snprintf(TimeString, sizeof(TimeString),
+           "%s, %02u:%02u%c%02u",
+           daysOfTheWeek[myweekday],
+           static_cast<unsigned>(myhours),
+           static_cast<unsigned>(myminutes),
+           dd,
+           static_cast<unsigned>(mysecunds));
+
+  if (!MenuPage) {
     lcd.setCursor(0, 3);
-    lcd.print(tempString);
-    Serial.print(tempString);
-  }
-  if(!MenuPage){
-    Serial.println((String)"\nTimeDate: "+daysOfTheWeek[timeClient.getDay()]+", "+timeClient.getHours()+":"+timeClient.getMinutes()+":"+timeClient.getSeconds()+"\n");
+    lcd.print(TimeString);
   }
 }
 /* *******************************************************************************************************
@@ -2037,7 +2044,7 @@ void connectToMqtt() {
  connect2mqtt=true; 
 }
 /* *******************************************************************************************************
-                                         NTP update + RTC check if connected
+                                         NTP update
 ******************************************************************************************************* */
 void set2mqttupdate(){
   mqtt2update=true;
@@ -3103,19 +3110,7 @@ in FHEM:   set MQTT_SERVER publish /SmartHome/Keller/Heizung/setRaumTemp up
   }
 }
 */
-/* *******************************************************************************************************
-                                         rtc reconnect
-******************************************************************************************************* */
-void rtcconnect(){
-  if (! rtc.begin()) {
-    Serial.println("Couldn't find RTC");
-    lcd.setCursor(0,2);
-    lcd.print("Couldn't find RTC");
-  }else{
-    lcd.setCursor(0,2);
-    lcd.print(" RTC connected!  ");
-  }
-}
+
 /* *******************************************************************************************************
                                          mqtt reconnect
 ******************************************************************************************************* */
@@ -3131,7 +3126,8 @@ void onMqttConnect(bool sessionPresent) {
 }
 
 void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
-  Serial.println("Disconnected from MQTT.");
+  Serial.printf("MQTT-Abbruchgrund: %u\n",
+              static_cast<unsigned>(reason));
   if (!WiFi.isConnected()){
     WiFi.disconnect();
     WiFi.begin(ssid,password);
@@ -3479,13 +3475,20 @@ void notifyClients() {
 }
 
 void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
-  AwsFrameInfo *info = (AwsFrameInfo*)arg;
-  if (info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT) {
-    data[len] = 0;
-    if (strcmp((char*)data, "toggle") == 0) {
-      HeizungsRelais = !HeizungsRelais;
-      notifyClients();
-    }
+  if (arg == nullptr || data == nullptr) {
+    return;
+  }
+
+  const AwsFrameInfo *info = static_cast<AwsFrameInfo*>(arg);
+  if (!info->final || info->index != 0 ||
+      info->len != len || info->opcode != WS_TEXT) {
+    return;
+  }
+
+  // Empfangspuffer unveraendert lassen; exakt sechs Zeichen pruefen.
+  if (len == 6 && memcmp(data, "toggle", 6) == 0) {
+    HeizungsRelais = !HeizungsRelais;
+    notifyClients();
   }
 }
 

@@ -30,88 +30,35 @@ https://github.com/fedorweems/YouTube/blob/Arduino-Game-V1/ESP8266%20Home%20Auto
 #include <ArduinoJson.h>
 
 //define externe Mischersteuerung per I2c
-#define EXMISCHER
+#include "config.h"
 
 //3 seconds WDT
-#define WDT_TIMEOUT 200
 
 #include "secrets.h"
 
 //#define SECRET_SSID "MyAP4Me"
 //#define SECRET_PASS "dasisteintest"
 
-#define MQTT_CLIENT_ID "ESP32_Heizung_Test"
 
 
-#define MQTT_HOST IPAddress(192, 168, 0, 1)
-#define MQTT_PORT 1883
 
 //define PIN für DS18B20
-#define VORLAUFTEMP 25
-#define AUSSENTEMP 26
-#define KUECHENTEMP 27
-#define KESSELTEMP 32
-#define BOILERTEMP 33
 //https://github.com/JChristensen/Timezone/tree/master/examples/Change_TZ_1
-#define MYSERIAL 0  //Serial mit 1 einschalten
-#define BAUD_RATE 115200
-#define MISCHER_WAIT 30
-#define MISCHER_DRIVE 5
-#define MISCHER_INIT_TIME_ZU 6000
-#define MISCHER_INIT_TIME_AUF 10000
 //define Ausgänge
-#define MISCHER_AUF_PIN 18
-#define MISCHER_ZU_PIN 2
-#define BRENNER_PIN 16
-#define HEIZUNG_PIN 17
-#define BOILER_PIN 4
 
-#define lcd_addr 0x27
-#define keypad_addr 0x20
-#define ioextender0_addr 0x22
 //A0-A1-A2 dip switch to off position
 
-#define MQTT_TEXT "/SmartHome/Test/Heizung/"
 /*  https://haus-automatisierung.com/nodered/2017/12/13/node-red-tutorial-reihe-part-4-verbindung-fhem.html */
 
-#define MENUPAGE_TEMPERATUR 1 ... 6
-#define MENUPAGE_TEMPERATUR1 14 ... 17
 
 //zwischen Menupage 1 unt 5 soll *C angezeigt werden
-#define MENUPAGE_NUM 7 ... 9
 //zwischen Menaupage 6 und 8 soll nur die Zahl angezeigt werden
-#define MENUPAGE_TIME 10 ... 12
 //zwischen Menupage 9 und 11 soll HH.M angezeigt werden /float
-#define MENUPAGE_SZ 13
-#define MENUPAGE_NUM_AT 18
-#define MENUPAGE_MAX 18
 /* *******************************************************************************************************
                                          EEPROM
 ******************************************************************************************************* */
-#define EEADDRESS_BOILER 0
-#define EEADDRESS_RAUM 8
-#define EEADDRESS_KESSEL 16
-#define EEADDRESS_DIFFRAUM 24
-#define EEADDRESS_DIFFKESSEL 32
-#define EEADDRESS_RAUMNACHT 40
-#define EEADDRESS_TAG 48
-#define EEADDRESS_NACHT 56
-#define EEADDRESS_DIFFBOILER 64
-#define EEADDRESS_BOILER_SOMMERBETRIEB 72
-#define EEADDRESS_NUR_HEIZUNG 80
-#define EEADDRESS_BR_LAUFZEIT 88
-#define EEADDRESS_SOMMERZEIT_EINAUS 96
-#define EEADDRESS_WINTER 104
-#define EEADDRESS_TVMAX 112
-#define EEADDRESS_TAUMIN 120
-#define EEADDRESS_NN 128
-#define EEADDRESS_AUSSENTEMPREGELUNG 136
-#define EEADDRESS_KACHELOFEN_EIN 144
-#define EEADDRESS_KACHELOFEN_AUS 152
-#define EE_SIZE EEADDRESS_KACHELOFEN_AUS+8
 
 
-#define KESSEL_MIN_TEMP 30.0
 float kessel_min_temp = KESSEL_MIN_TEMP; // for incoming serial data
 
 //Werte zum 1-maligen setzen im EEPROM
@@ -144,7 +91,6 @@ bool ntpTimeValid = false;
                                          Netzwerk
 ******************************************************************************************************* */
 //https://github.com/micw/ArduinoProjekte/blob/master/HeizungsSteuerung/HeizungsSteuerung.ino
-#define WIFI_RECON_TIMER 2000
 int wifi_retry=0;
 int wifi_rssi=0;
 // Insert your WiFi secrets here:
@@ -174,9 +120,6 @@ int AussentemperaturRegelung,AussentemperaturRegelungAlt = 0;
 byte Pumpenloesen = 0;
 byte PumpenNachlauf = 0;
 //Pumpenloesen von 18:25 bis 18:27
-#define PUMPENL_HR 18
-#define PUMPENL_MIN_B 25
-#define PUMPENL_MIN_E 27
 bool KesselHeizen, RoomHeizen, BoilerHeizen, RoomAnforderung, BoilerAnforderung = false;
 bool BrennerRelais, HeizungsRelais, BoilerRelais, BoilerAufheizen = false;
 bool MischerAufRelais, MischerZuRelais = false;
@@ -206,11 +149,6 @@ RegelungsModus regelungsModus = REGELUNG_AUTO;
 
 unsigned int jumptoDefault = 0;
 char jump = '0';
-#define OS0 0.00           // Offset Temp Sensor 1 (alle Offsets bitte mit allen Temp.Sensoren abgleichen!)
-#define OS1 0.00           // Offset Temp Sensor 1 (alle Offsets bitte mit allen Temp.Sensoren abgleichen!)
-#define OS2 0.00           // Offset Temp Sensor 2
-#define OS3 0.00          // Offset Temp Sensor 3
-#define OS4 0.00            // Offset Temp Sensor 4
 /* *******************************************************************************************************
                                               Zeit
 ******************************************************************************************************* */
@@ -219,7 +157,6 @@ volatile int TagBeginHr, TagBeginMi, NachtBeginHr, NachtBeginMi;
 /* *******************************************************************************************************
                                               mqtt
 ******************************************************************************************************* */
-#define MQTT_RECON_TIMER 2000
 uint32_t wait_for_connect = 0;
 //IPAddress MqttServer(192,168,000,002);
 WiFiClient net;
@@ -514,17 +451,11 @@ setInterval(function ( ) {
 ******************************************************************************************************* */
 //NTPClient
 //GMT Time Zone with sign
-#define GMT_TIME_ZONE +1
 
 //change this to a random number between 0-255 to force time update
-#define NTP_UPDATE 30000
-#define NTP_UPDATE_HOUR 3
 
 //closest NTP Server
 //#define NTP_SERVER "0.at.pool.ntp.org"
-#define NTP_SERVER1 "192.168.0.1"
-#define NTP_SERVER2 "0.at.pool.ntp.org"
-#define NTP_SERVER3 "1.at.pool.ntp.org"
 const long utcOffsetInSeconds = 3600;
 char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
 unsigned long timeUpdated = 0;
@@ -558,7 +489,6 @@ const String sVers="V1.03";
                                          Timing
 ******************************************************************************************************* */
 //const unsigned long ANSWER_TIME = 1900;
-#define ANSWER_TIME   1100UL
 unsigned long previousTime = 0;
 unsigned long previousTime1 = 0;
 unsigned long previousTime_MischerInit = 0;
@@ -658,7 +588,6 @@ NEU ESP32:
                                          DS18B20 Sensoren
 ******************************************************************************************************* */
 
-#define POWER_MODE 0 //power mode: 0 - external, 1 - parasitic
 //--------------------------fuer OneWire.h-------------------
 OneWire sensorDS1820[5]{
   OneWire(KESSELTEMP),
@@ -673,7 +602,6 @@ byte type_s;
 int setup_sensorDS1820=5;
 //--------------------------fuer OneWire.h-------------------
 static const byte kTtureSensorMaxIndex=4;
-#define BOILER_NUMBER 4
 static const int tture[kTtureSensorMaxIndex+1] = {KESSELTEMP,VORLAUFTEMP,AUSSENTEMP,KUECHENTEMP,BOILERTEMP};
 
 byte bLoopCounter = 0;//used for misc loop counters.

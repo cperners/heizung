@@ -226,9 +226,15 @@ float kachelofenAusTemp = 40.0;
 const unsigned long kachelofenTimeout = 10UL * 60UL * 1000UL;
 enum RegelungsModus { REGELUNG_AUTO, REGELUNG_RAUM, REGELUNG_AUSSEN };
 RegelungsModus regelungsModus = REGELUNG_AUTO;
-volatile int requestedWebMode = -1;
+int requestedWebMode = -1;
+portMUX_TYPE webSettingsMux = portMUX_INITIALIZER_UNLOCKED;
+struct KachelofenThresholdRequest { bool pending; float ein; float aus; };
+KachelofenThresholdRequest requestedKachelofenThresholds = {};
 int requestedOperatingMode = -1;
-struct RoomSetpointRequest { bool pending; float day; float night; };
+struct RoomSetpointRequest { bool pending; float day; float night; uint32_t id; };
+struct RoomSaveResult { uint32_t id; byte state; };
+RoomSaveResult roomSaveResults[8] = {};
+uint32_t nextRoomSaveId = 0;
 RoomSetpointRequest requestedRoomSetpoints = {};
 portMUX_TYPE roomSetpointMux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE operatingModeMux = portMUX_INITIALIZER_UNLOCKED;
@@ -446,7 +452,7 @@ form { line-height: 2; font-size: .9rem; }
     <span id="tkachelofen">%TKACHELOFEN%</span>
     <sup class="units">&deg;C</sup>
   </div>
-  <div>Kachelofen: <strong>%KACHELOFENSTATUS%</strong></div>
+  <div>Kachelofen: <strong id="kachelofen-status">%KACHELOFENSTATUS%</strong></div>
   <div class="threshold-card">
     <form class="threshold-form" action="/kachelofen" method="get">
   <h3>Kachelofen-Schaltschwellen</h3>
@@ -491,173 +497,81 @@ function adjustThreshold(id, direction) {
   </section>
   <p>
 <script>
-  setInterval(function ( ) {
-  var xhttp = new XMLHttpRequest();
-  xhttp.onreadystatechange = function() {
-    if (this.readyState == 4 && this.status == 200) {
-      document.getElementById("troom").innerHTML = this.responseText;
-    }
-  };
-  xhttp.open("GET", "/troom", true);
-  xhttp.send();
-}, 10000 ) ;
-
-setInterval(function ( ) {
-  var xhttp = new XMLHttpRequest();
-  xhttp.onreadystatechange = function() {
-    if (this.readyState == 4 && this.status == 200) {
-      document.getElementById("taussen").innerHTML = this.responseText;
-    }
-  };
-  xhttp.open("GET", "/taussen", true);
-  xhttp.send();
-}, 10000 ) ;
-
-setInterval(function ( ) {
-  var xhttp = new XMLHttpRequest();
-  xhttp.onreadystatechange = function() {
-    if (this.readyState == 4 && this.status == 200) {
-      document.getElementById("tkessel").innerHTML = this.responseText;
-    }
-  };
-  xhttp.open("GET", "/tkessel", true);
-  xhttp.send();
-}, 10000 ) ;
-
-setInterval(function ( ) {
-  var xhttp = new XMLHttpRequest();
-  xhttp.onreadystatechange = function() {
-    if (this.readyState == 4 && this.status == 200) {
-      document.getElementById("tvorlauf").innerHTML = this.responseText;
-    }
-  };
-  xhttp.open("GET", "/tvorlauf", true);
-  xhttp.send();
-}, 10000 ) ;
-
-setInterval(function ( ) {
-  var xhttp = new XMLHttpRequest();
-  xhttp.onreadystatechange = function() {
-    if (this.readyState == 4 && this.status == 200) {
-      document.getElementById("tboiler").innerHTML = this.responseText;
-    }
-  };
-  xhttp.open("GET", "/tboiler", true);
-  xhttp.send();
-}, 10000 ) ;
-
-setInterval(function ( ) {
-  var xhttp = new XMLHttpRequest();
-  xhttp.onreadystatechange = function() {
-    if (this.readyState == 4 && this.status == 200) {
-      document.getElementById("tkachelofen").innerHTML = this.responseText;
-    }
-  };
-  xhttp.open("GET", "/tkachelofen", true);
-  xhttp.send();
-}, 10000 ) ;
-
-function updateBrennerSensorLock() {
-  fetch('/brennersperre', {cache: 'no-store'})
-    .then(function(response) {
-      if (!response.ok) throw new Error('Status nicht erreichbar');
-      return response.text();
-    })
-    .then(function(status) { document.getElementById('brennersperre').textContent = status; })
-    .catch(function() { document.getElementById('brennersperre').textContent = 'Sperrstatus nicht erreichbar'; });
+function roomSaveRequest(url, method, body) {
+  return new Promise(function(resolve, reject) {
+    var request = new XMLHttpRequest();
+    request.open(method, url, true); request.timeout = 2500;
+    if (body) request.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+    request.onload = function() {
+      if (request.status < 200 || request.status >= 300) { reject(new Error('Anfrage abgelehnt')); return; }
+      try { resolve(JSON.parse(request.responseText)); } catch (error) { reject(error); }
+    };
+    request.onerror = request.ontimeout = function() { reject(new Error('Keine Antwort')); };
+    request.send(body || null);
+  });
 }
-setInterval(updateBrennerSensorLock, 3000);
-
-var clockRequestPending = false;
-function updateHeaderClock() {
-  if (clockRequestPending) return;
-  clockRequestPending = true;
-  var request = new XMLHttpRequest();
-  request.open('GET', '/uhrzeit?tick=' + Date.now(), true);
-  request.timeout = 2500;
-  request.onload = function() {
-    if (request.status === 200) document.getElementById('header-clock').textContent = request.responseText;
-  };
-  request.onloadend = function() { clockRequestPending = false; };
-  request.send();
-}
-setInterval(updateHeaderClock, 1000);
-updateHeaderClock();
-
-document.getElementById('room-setpoints').addEventListener('submit', function(event) {
+document.getElementById('room-setpoints').addEventListener('submit', async function(event) {
   event.preventDefault();
   var button = document.getElementById('room-save');
   var status = document.getElementById('room-save-status');
   button.disabled = true; status.textContent = 'Wird gespeichert...';
-  var body = new URLSearchParams(new FormData(event.target));
-  fetch('/raumtemperaturen', {method:'POST', body:body})
-    .then(function(response) { if (!response.ok) throw new Error();
-      status.textContent = 'Zur Übernahme vorgemerkt. Bitte anschließend neu laden und Werte prüfen.';
-    })
-    .catch(function() { status.textContent = 'Speichern nicht bestätigt. Bitte Verbindung prüfen.'; })
-    .finally(function() { button.disabled = false; });
+  try {
+    var body = new URLSearchParams(new FormData(event.target)).toString();
+    var accepted = await roomSaveRequest('/raumtemperaturen', 'POST', body);
+    var confirmed = false;
+    for (var attempt = 0; attempt < 20; ++attempt) {
+      await new Promise(function(resolve) { setTimeout(resolve, 500); });
+      var result = await roomSaveRequest('/raumtemperaturen-status?id='+accepted.id, 'GET');
+      if (result.state === 2) { status.textContent = 'Wunschtemperaturen gespeichert.'; confirmed = true; break; }
+      if (result.state === 3) { status.textContent = 'Speichern fehlgeschlagen. Bisherige Werte bleiben aktiv.'; confirmed = true; break; }
+    }
+    if (!confirmed) status.textContent = 'Speichern noch nicht bestätigt. Bitte neu laden und Werte prüfen.';
+  } catch (error) {
+    status.textContent = 'Speichern nicht bestätigt. Bitte neu laden und Werte prüfen.';
+  } finally { button.disabled = false; }
 });
 
 var outputKeys = ['brenner','boiler','heizung','mischerauf','mischerzu'];
-var outputStatusPending = false;
-function updateOutputStatus() {
-  if (outputStatusPending) return;
-  outputStatusPending = true;
+var statusTextKeys = ['troom','taussen','tkessel','tvorlauf','tboiler','tkachelofen','header-clock','brennersperre','regelungsart','betriebsart','gas-day','gas-total','ntp-abweichung','kachelofen-status'];
+var sharedStatusPending = false;
+var lastStatusGeneration = null;
+var lastStatusChange = Date.now();
+function unavailableSharedStatus() {
+  outputKeys.forEach(function(key) {
+    document.getElementById('led-'+key).className = 'output-led';
+    document.getElementById('status-'+key).textContent = 'Nicht erreichbar';
+  });
+  statusTextKeys.forEach(function(key) {
+    document.getElementById(key).textContent = key.charAt(0) === 't' ? '--' : 'Nicht erreichbar';
+  });
+}
+function updateSharedStatus() {
+  if (sharedStatusPending) return;
+  sharedStatusPending = true;
   var request = new XMLHttpRequest();
-  request.open('GET', '/ausgangsstatus', true); request.timeout = 2500;
-  function unavailable() {
-    outputKeys.forEach(function(key) {
-      document.getElementById('led-'+key).className = 'output-led';
-      document.getElementById('status-'+key).textContent = 'Nicht erreichbar';
-    });
-  }
+  request.open('GET', '/webstatus', true); request.timeout = 2500;
   request.onload = function() {
-    if (request.status !== 200) { unavailable(); return; }
+    if (request.status !== 200) { unavailableSharedStatus(); return; }
     try {
-      var values = JSON.parse(request.responseText);
-      if (!Array.isArray(values) || values.length !== 5) throw new Error();
+      var data = JSON.parse(request.responseText);
+      if (!data.values || !Array.isArray(data.outputs) || data.outputs.length !== 5 || typeof data.generation !== 'number') throw new Error();
+      statusTextKeys.forEach(function(key) { if (typeof data.values[key] !== 'string') throw new Error(); });
+      data.outputs.forEach(function(value) { if (value !== 0 && value !== 1) throw new Error(); });
+      if (lastStatusGeneration !== data.generation) { lastStatusGeneration = data.generation; lastStatusChange = Date.now(); }
+      if (Date.now()-lastStatusChange > 6000) { unavailableSharedStatus(); return; }
+      statusTextKeys.forEach(function(key) { document.getElementById(key).textContent = data.values[key]; });
       outputKeys.forEach(function(key, index) {
-        var active = values[index] === 1;
+        var active = data.outputs[index] === 1;
         document.getElementById('led-'+key).className = 'output-led ' + (active ? 'on' : 'off');
         document.getElementById('status-'+key).textContent = active ? 'Ein' : 'Aus';
       });
-    } catch (error) { unavailable(); }
+    } catch (error) { unavailableSharedStatus(); }
   };
-  request.onerror = unavailable; request.ontimeout = unavailable;
-  request.onloadend = function() { outputStatusPending = false; };
+  request.onerror = request.ontimeout = unavailableSharedStatus;
+  request.onloadend = function() { sharedStatusPending = false; };
   request.send();
 }
-setInterval(updateOutputStatus, 1000); updateOutputStatus();
-
-function updateNtpProbe() {
-  fetch('/ntp-abweichung', {cache:'no-store'})
-    .then(function(response) { if (!response.ok) throw new Error(); return response.text(); })
-    .then(function(text) { document.getElementById('ntp-abweichung').textContent = text; })
-    .catch(function() { document.getElementById('ntp-abweichung').textContent = 'Nicht erreichbar'; });
-}
-setInterval(updateNtpProbe, 5000); updateNtpProbe();
-setInterval(function() {
-  fetch('/betriebsart' , {cache: 'no-store'})
-    .then(function(response) { if (!response.ok) throw new Error(); return response.text(); })
-    .then(function(text) { document.getElementById('betriebsart').textContent = text; })
-    .catch(function() { document.getElementById('betriebsart').textContent = 'Betriebsstatus nicht erreichbar'; });
-}, 3000);
-
-setInterval(function() {
-  fetch('/regelungsart', {cache: 'no-store'})
-    .then(function(response) { if (!response.ok) throw new Error(); return response.text(); })
-    .then(function(text) { document.getElementById('regelungsart').textContent = text; })
-    .catch(function() { document.getElementById('regelungsart').textContent = 'Regelungsstatus nicht erreichbar'; });
-}, 3000);
-
-setInterval(function() {
-  [['/gas?daily=1', 'gas-day'], ['/gas', 'gas-total']].forEach(function(item) {
-    fetch(item[0], {cache: 'no-store'})
-      .then(function(response) { if (!response.ok) throw new Error(); return response.text(); })
-      .then(function(text) { document.getElementById(item[1]).textContent = text; })
-      .catch(function() { document.getElementById(item[1]).textContent = 'Nicht erreichbar'; });
-  });
-}, 10000);
+setInterval(updateSharedStatus, 1000); updateSharedStatus();
 </script>
 </body>
 </html>)rawliteral";
@@ -834,9 +748,9 @@ OneWire sensorDS1820[5]{
   OneWire(BOILERTEMP),
 };
 //byte addr[4][8];
-byte addr[8];
-byte type_s;
-int setup_sensorDS1820=5;
+byte sensorFamily[5] = {};
+unsigned long sensorFamilyLastAttempt[5] = {};
+bool sensorFamilyAttempted[5] = {};
 //--------------------------fuer OneWire.h-------------------
 static const byte kTtureSensorMaxIndex=4;
 static const int tture[kTtureSensorMaxIndex+1] = {KESSELTEMP,VORLAUFTEMP,AUSSENTEMP,KUECHENTEMP,BOILERTEMP};
@@ -1247,6 +1161,48 @@ struct PendingMqttMessage {
 constexpr unsigned MQTT_QUEUE_LENGTH = 8;
 QueueHandle_t mqttMessageQueue = nullptr;
 
+constexpr size_t WEB_STATUS_CAPACITY = 2048;
+char webStatusCache[WEB_STATUS_CAPACITY] = {};
+size_t webStatusLength = 0;
+portMUX_TYPE webStatusMux = portMUX_INITIALIZER_UNLOCKED;
+void refreshWebStatus() {
+  static unsigned long lastRefresh = 0;
+  static uint32_t generation = 0;
+  const unsigned long now = millis();
+  if (generation != 0 && now-lastRefresh < 1000UL) return;
+  lastRefresh = now;
+  JsonDocument doc;
+  doc["generation"] = ++generation;
+  JsonObject values = doc["values"].to<JsonObject>();
+  values["troom"] = readTemperature(tRoom);
+  values["taussen"] = readTemperature(tAussen);
+  values["tkessel"] = readTemperature(tKessel);
+  values["tvorlauf"] = readTemperature(tVorlauf);
+  values["tboiler"] = readTemperature(tBoiler);
+  values["tkachelofen"] = readTemperature(tKachelofen);
+  values["header-clock"] = processor("WEBTIME");
+  values["brennersperre"] = sensorIsUsable(0) ? "Kesselsensor OK - keine Sensorsperre" : "BRENNER GESPERRT - Kesselsensor ungueltig";
+  values["regelungsart"] = regelungsModus == REGELUNG_AUTO ? (AussentemperaturRegelung ? "AUTO / AUSSENTEMPERATUR" : "AUTO / RAUMTEMPERATUR") : (regelungsModus == REGELUNG_RAUM ? "MANUELL / RAUMTEMPERATUR" : "MANUELL / AUSSENTEMPERATUR");
+  values["betriebsart"] = WinterBetrieb ? "AUTOMATIKBETRIEB" : BoilerBetrieb ? "NUR BOILER" : NurHeizung ? "NUR HEIZUNG" : "AUS";
+  values["gas-day"] = gasDisplay(true);
+  values["gas-total"] = gasDisplay(false);
+  values["ntp-abweichung"] = ntpProbeDisplay();
+  values["kachelofen-status"] = kachelofenAktiv ? "AKTIV" : "INAKTIV";
+  JsonArray outputs = doc["outputs"].to<JsonArray>();
+  outputs.add(digitalRead(BrennerPin) == HIGH ? 1 : 0);
+  outputs.add(digitalRead(BoilerPin) == HIGH ? 1 : 0);
+  outputs.add(digitalRead(HeizungPin) == HIGH ? 1 : 0);
+  outputs.add(digitalRead(MischerAuf_Pin) == HIGH ? 1 : 0);
+  outputs.add(digitalRead(MischerZu_Pin) == HIGH ? 1 : 0);
+  if (doc.overflowed() || measureJson(doc) >= WEB_STATUS_CAPACITY) return;
+  char buffer[WEB_STATUS_CAPACITY];
+  const size_t length = serializeJson(doc, buffer, sizeof(buffer));
+  portENTER_CRITICAL(&webStatusMux);
+  memcpy(webStatusCache, buffer, length+1);
+  webStatusLength = length;
+  portEXIT_CRITICAL(&webStatusMux);
+}
+
 void setup() {
   mqttMessageQueue = xQueueCreate(MQTT_QUEUE_LENGTH, sizeof(PendingMqttMessage));
 
@@ -1468,6 +1424,16 @@ void setup() {
   }
   request->send(200, "text/html; charset=utf-8", page);
 });
+  server.on("/webstatus", HTTP_GET, [](AsyncWebServerRequest *request){
+    char buffer[WEB_STATUS_CAPACITY];
+    portENTER_CRITICAL(&webStatusMux);
+    const size_t length = webStatusLength;
+    memcpy(buffer, webStatusCache, length+1);
+    portEXIT_CRITICAL(&webStatusMux);
+    if (length == 0) { request->send(503, "text/plain", "Status wird vorbereitet"); return; }
+    AsyncWebServerResponse* response = request->beginResponse(200, "application/json", buffer);
+    response->addHeader("Cache-Control", "no-store"); request->send(response);
+  });
   server.on("/gas", HTTP_GET, [](AsyncWebServerRequest *request){
     const bool daily = request->hasParam("daily");
     request->send(200, "text/plain; charset=utf-8", gasDisplay(daily));
@@ -1485,10 +1451,40 @@ void setup() {
         day < 5 || day > 40 || night < 5 || night > 40) {
       request->send(400, "text/plain; charset=utf-8", "Ungueltige Wunschtemperaturen (5 bis 40 Grad)"); return;
     }
+    uint32_t id = 0;
     portENTER_CRITICAL(&roomSetpointMux);
-    requestedRoomSetpoints = {true, day, night};
+    if (!requestedRoomSetpoints.pending) {
+      uint32_t candidate = nextRoomSaveId + 1;
+      if (candidate == 0) candidate = 1;
+      RoomSaveResult& result = roomSaveResults[candidate % 8];
+      if (result.state != 1) {
+        nextRoomSaveId = id = candidate;
+        result = {id, 1};
+        requestedRoomSetpoints = {true, day, night, id};
+      }
+    }
     portEXIT_CRITICAL(&roomSetpointMux);
-    request->send(202, "text/plain; charset=utf-8", "Uebernahme vorgemerkt");
+    if (id == 0) { request->send(409, "text/plain", "Speichern laeuft bereits"); return; }
+    char response[40]; snprintf(response, sizeof(response), "{\"id\":%lu}", static_cast<unsigned long>(id));
+    request->send(202, "application/json", response);
+  });
+  server.on("/raumtemperaturen-status", HTTP_GET, [](AsyncWebServerRequest *request){
+    if (!request->hasParam("id")) { request->send(400, "text/plain", "ID fehlt"); return; }
+    const String text = request->getParam("id")->value();
+    if (text.length() == 0 || text.length() > 10) { request->send(400, "text/plain", "ID ungueltig"); return; }
+    for (unsigned int i = 0; i < text.length(); ++i) {
+      if (text[i] < '0' || text[i] > '9') { request->send(400, "text/plain", "ID ungueltig"); return; }
+    }
+    const uint64_t parsed = strtoull(text.c_str(), nullptr, 10);
+    if (parsed == 0 || parsed > UINT32_MAX) { request->send(400, "text/plain", "ID ungueltig"); return; }
+    const uint32_t id = static_cast<uint32_t>(parsed);
+    portENTER_CRITICAL(&roomSetpointMux);
+    const RoomSaveResult result = roomSaveResults[id % 8];
+    portEXIT_CRITICAL(&roomSetpointMux);
+    if (result.id != id) { request->send(404, "text/plain", "Speicherauftrag nicht mehr verfuegbar"); return; }
+    char body[24]; snprintf(body, sizeof(body), "{\"state\":%u}", result.state);
+    AsyncWebServerResponse* response = request->beginResponse(200, "application/json", body);
+    response->addHeader("Cache-Control", "no-store"); request->send(response);
   });
   server.on("/ausgangsstatus", HTTP_GET, [](AsyncWebServerRequest *request){
     char result[32];
@@ -1523,10 +1519,11 @@ void setup() {
       request->send(400, "text/plain", "Regelungsart fehlt"); return;
     }
     const String mode = request->getParam("modus", true)->value();
-    if (mode == "auto") requestedWebMode = REGELUNG_AUTO;
-    else if (mode == "raum") requestedWebMode = REGELUNG_RAUM;
-    else if (mode == "aussen") requestedWebMode = REGELUNG_AUSSEN;
-    else { request->send(400, "text/plain", "Ungueltige Regelungsart"); return; }
+    const int selectedMode = mode == "auto" ? REGELUNG_AUTO : mode == "raum" ? REGELUNG_RAUM : mode == "aussen" ? REGELUNG_AUSSEN : -1;
+    if (selectedMode < 0) { request->send(400, "text/plain", "Ungueltige Regelungsart"); return; }
+    portENTER_CRITICAL(&webSettingsMux);
+    requestedWebMode = selectedMode;
+    portEXIT_CRITICAL(&webSettingsMux);
     request->redirect("/");
   });
   server.on("/regelungsart", HTTP_GET, [](AsyncWebServerRequest *request){
@@ -1564,12 +1561,9 @@ void setup() {
       request->send(400, "text/plain", "Ungueltige Kachelofen-Schaltschwellen");
       return;
     }
-    kachelofenEinTemp = newEin;
-    kachelofenAusTemp = newAus;
-    EEPROM.put( EEADDRESS_KACHELOFEN_EIN, kachelofenEinTemp );
-    EEPROM.put( EEADDRESS_KACHELOFEN_AUS, kachelofenAusTemp );
-    EEPROM.commit();
-    updateKachelofenStatus();
+    portENTER_CRITICAL(&webSettingsMux);
+    requestedKachelofenThresholds = {true, newEin, newAus};
+    portEXIT_CRITICAL(&webSettingsMux);
     request->redirect("/");
   });
   // Start ElegantOTA
@@ -1610,14 +1604,37 @@ void loop(){
   requestedRoomSetpoints.pending = false;
   portEXIT_CRITICAL(&roomSetpointMux);
   if (roomRequest.pending) {
-    tRoomTag = roomRequest.day; tRoomNacht = roomRequest.night;
-    EEPROM.put(EEADDRESS_RAUM, tRoomTag);
-    EEPROM.put(EEADDRESS_RAUMNACHT, tRoomNacht);
-    if (!EEPROM.commit()) Serial.println("Wunschtemperaturen: Speichern fehlgeschlagen");
+    const float previousDay = tRoomTag, previousNight = tRoomNacht;
+    EEPROM.put(EEADDRESS_RAUM, roomRequest.day);
+    EEPROM.put(EEADDRESS_RAUMNACHT, roomRequest.night);
+    const bool saved = EEPROM.commit();
+    if (saved) {
+      tRoomTag = roomRequest.day; tRoomNacht = roomRequest.night;
+    } else {
+      EEPROM.put(EEADDRESS_RAUM, previousDay);
+      EEPROM.put(EEADDRESS_RAUMNACHT, previousNight);
+      Serial.println("Wunschtemperaturen: Speichern fehlgeschlagen");
+    }
+    portENTER_CRITICAL(&roomSetpointMux);
+    RoomSaveResult& result = roomSaveResults[roomRequest.id % 8];
+    if (result.id == roomRequest.id) result.state = saved ? 2 : 3;
+    portEXIT_CRITICAL(&roomSetpointMux);
   }
+  portENTER_CRITICAL(&webSettingsMux);
   const int webMode = requestedWebMode;
+  requestedWebMode = -1;
+  const KachelofenThresholdRequest thresholdRequest = requestedKachelofenThresholds;
+  requestedKachelofenThresholds.pending = false;
+  portEXIT_CRITICAL(&webSettingsMux);
+  if (thresholdRequest.pending) {
+    kachelofenEinTemp = thresholdRequest.ein;
+    kachelofenAusTemp = thresholdRequest.aus;
+    EEPROM.put(EEADDRESS_KACHELOFEN_EIN, kachelofenEinTemp);
+    EEPROM.put(EEADDRESS_KACHELOFEN_AUS, kachelofenAusTemp);
+    if (!EEPROM.commit()) Serial.println("Kachelofen-Schaltschwellen: Speichern fehlgeschlagen");
+    updateKachelofenStatus();
+  }
   if (webMode >= 0) {
-    requestedWebMode = -1;
     regelungsModus = static_cast<RegelungsModus>(webMode);
     updateKachelofenStatus();
   }
@@ -1677,7 +1694,7 @@ void loop(){
     //ds_alt    readTturePt1(tture[bWhichSensor]);//N.B.: Values passed back in globals
     if (bWhichSensor==BOILER_NUMBER){readTturePt1(tture[bWhichSensor]);}
     else{
-      if(setup_sensorDS1820){sensorDS1820_indicateChip(bWhichSensor); setup_sensorDS1820--;}//Setup nur einmal beim Start ausführen
+      sensorDS1820_indicateChip(bWhichSensor);
       sensorDS1820_reset(bWhichSensor);
    } //ds_neu
     // Conversion time starts when the command has actually been sent.
@@ -1765,6 +1782,7 @@ else {sensorDS1820_read(bWhichSensor);} //ds_neu
    timer2_ntp.update();
    timer3_mqttupdate.update();
   esp_task_wdt_reset(); //watchdog Zeit wieder rücksetzen
+  refreshWebStatus();
 }//end of loop()
 
 
@@ -2928,6 +2946,7 @@ byte OneWireInByte(int Pin) // read byte, least sig byte first
 }//end OneWireInByte()
 
 void readTturePt1(byte Pin){
+   sensorDS1820_indicateChip(BOILER_NUMBER);
    if (!sensorDS1820[BOILER_NUMBER].reset()) {
      boilerDiagnostic = BOILER_NO_RESPONSE;
      markSensorFailure(BOILER_NUMBER);
@@ -2964,11 +2983,21 @@ void readTturePt2(byte Pin, const byte tmp_bWhichSensor){
      markSensorFailure(tmp_bWhichSensor);
      return;
    }
+   if (sensorFamily[tmp_bWhichSensor] == 0) {
+     boilerDiagnostic = BOILER_BAD_VALUE;
+     markSensorFailure(tmp_bWhichSensor);
+     return;
+   }
    int16_t raw = static_cast<int16_t>((scratchpad[1] << 8) | scratchpad[0]);
-   const byte resolution = scratchpad[4] & 0x60;
-   if (resolution == 0x00) raw &= ~7;
-   else if (resolution == 0x20) raw &= ~3;
-   else if (resolution == 0x40) raw &= ~1;
+   if (sensorFamily[tmp_bWhichSensor] == 0x10) {
+     raw = static_cast<int16_t>(int32_t(raw) * 8);
+     if (scratchpad[7] == 0x10) raw = (raw & 0xFFF0) + 12 - scratchpad[6];
+   } else {
+     const byte resolution = scratchpad[4] & 0x60;
+     if (resolution == 0x00) raw &= ~7;
+     else if (resolution == 0x20) raw &= ~3;
+     else if (resolution == 0x40) raw &= ~1;
+   }
    const float measured = raw / 16.0f;
    if (!markSensorSuccess(tmp_bWhichSensor, measured)) return;
    if (tBoiler != measured + OS4) {
@@ -4139,33 +4168,26 @@ void MischerStop(){
 //#################################################################################################################################
 void sensorDS1820_indicateChip(byte pin)
 {
-  if (pin > kTtureSensorMaxIndex) return;
-  if ( !sensorDS1820[pin].search(addr)) {
-    sensorDS1820[pin].reset_search();
-    delay(250);
+  if (pin > kTtureSensorMaxIndex || sensorFamily[pin] != 0) return;
+  const unsigned long now = millis();
+  if (sensorFamilyAttempted[pin] && now - sensorFamilyLastAttempt[pin] < 30000UL) return;
+  sensorFamilyAttempted[pin] = true;
+  sensorFamilyLastAttempt[pin] = now;
+  // Each existing sensor bus has one sensor (temperature commands use Skip ROM).
+  // Read its ROM directly, avoiding the extra bit exchanges of Search ROM.
+  byte address[8];
+  if (!sensorDS1820[pin].reset()) { markSensorFailure(pin); return; }
+  sensorDS1820[pin].write(0x33, POWER_MODE); // Read ROM
+  for (byte i = 0; i < sizeof(address); ++i) address[i] = sensorDS1820[pin].read();
+  if (OneWire::crc8(address, 7) != address[7]) {
+    markSensorFailure(pin);
     return;
   }
-  if (OneWire::crc8(addr, 7) != addr[7]) {
-      Serial.println("CRC is not valid!");
-      return;
+  if (address[0] != 0x10 && address[0] != 0x28 && address[0] != 0x22) {
+    markSensorFailure(pin);
+    return;
   }
-  switch (addr[0]) {
-    case 0x10:
-      Serial.println("  Chip = DS18S20");  // or old DS1820
-      type_s = 1;
-      break;
-    case 0x28:
-      Serial.println("  Chip = DS18B20");
-      type_s = 0;
-      break;
-    case 0x22:
-      Serial.println("  Chip = DS1822");
-      type_s = 0;
-      break;
-    default:
-      Serial.println("Device is not a DS18x20 family device.");
-      return;
-  }
+  sensorFamily[pin] = address[0];
 }
 //#################################################################################################################################
 void sensorDS1820_reset(byte pin)
@@ -4179,6 +4201,7 @@ void sensorDS1820_reset(byte pin)
 void sensorDS1820_read(byte pin)
 {
   if (pin > kTtureSensorMaxIndex) return;
+  if (sensorFamily[pin] == 0) { markSensorFailure(pin); return; }
   float temperature;
   //byte bufData[9];
   if (!sensorDS1820[pin].reset()) { markSensorFailure(pin); return; }
@@ -4191,16 +4214,15 @@ void sensorDS1820_read(byte pin)
 
 byte data[12];
 int16_t raw;
-//byte type_s;
-//type_s = 0;
+
 for ( int i = 0; i < 9; i++)
     { data[i] = sensorDS1820[pin].read(); }
 if(validSensorScratchpad(data)){
 
   raw = (data[1] << 8) | data[0];
-  if (type_s)
+  if (sensorFamily[pin] == 0x10)
     {
-    raw = raw << 3;
+    raw = static_cast<int16_t>(int32_t(raw) * 8);
     if (data[7] == 0x10)
       // Vorzeichen expandieren
       { raw = (raw & 0xFFF0) + 12 - data[6]; }

@@ -17,6 +17,8 @@ https://github.com/fedorweems/YouTube/blob/Arduino-Game-V1/ESP8266%20Home%20Auto
 #include <math.h>
 #include <WiFi.h>
 #include <esp_task_wdt.h>
+#include <esp_timer.h>
+#include <esp_freertos_hooks.h>
 #include <WiFiUdp.h>
 #include <sys/time.h>
 #include <time.h> // Clock einbinden
@@ -341,7 +343,7 @@ form { line-height: 2; font-size: .9rem; }
 </head>
 <body>
   <div class="topnav">
-    <h1><span>ESP32 Heizung</span><time id="header-clock">%WEBTIME%</time></h1>
+    <h1><span>ESP32 Heizung</span><span>Laufzeit: <span id="uptime">--</span></span><span style="font-size:.65em;" title="Anteil der Ticks ohne Leerlauf, keine exakte CPU-Zeitmessung">CPU-Sch&auml;tzung: <span id="cpu-load">--</span></span><time id="header-clock">%WEBTIME%</time></h1>
   </div>
   <section class="layout">
   <div>
@@ -532,7 +534,7 @@ document.getElementById('room-setpoints').addEventListener('submit', async funct
 });
 
 var outputKeys = ['brenner','boiler','heizung','mischerauf','mischerzu'];
-var statusTextKeys = ['troom','taussen','tkessel','tvorlauf','tboiler','tkachelofen','header-clock','brennersperre','regelungsart','betriebsart','gas-day','gas-total','ntp-abweichung','kachelofen-status'];
+var statusTextKeys = ['troom','taussen','tkessel','tvorlauf','tboiler','tkachelofen','header-clock','brennersperre','regelungsart','betriebsart','gas-day','gas-total','ntp-abweichung','kachelofen-status','uptime','cpu-load'];
 var sharedStatusPending = false;
 var lastStatusGeneration = null;
 var lastStatusChange = Date.now();
@@ -1161,6 +1163,47 @@ struct PendingMqttMessage {
 constexpr unsigned MQTT_QUEUE_LENGTH = 8;
 QueueHandle_t mqttMessageQueue = nullptr;
 
+// Coarse tick sampling: a tick counts as busy if no idle hook ran since
+// the previous tick. Partial-tick activity is not measured as exact CPU time.
+portMUX_TYPE cpuLoadMux = portMUX_INITIALIZER_UNLOCKED;
+bool cpuIdleSeen[2] = {};
+uint32_t cpuSampleTicks[2] = {}, cpuBusyTicks[2] = {};
+bool cpuLoadReady = false;
+char cpuLoadText[80] = "Messung startet";
+void IRAM_ATTR sampleCpuTick(unsigned core) {
+  portENTER_CRITICAL_ISR(&cpuLoadMux);
+  ++cpuSampleTicks[core];
+  if (!cpuIdleSeen[core]) ++cpuBusyTicks[core];
+  cpuIdleSeen[core] = false;
+  portEXIT_CRITICAL_ISR(&cpuLoadMux);
+}
+void IRAM_ATTR cpuTick0() { sampleCpuTick(0); }
+void IRAM_ATTR cpuTick1() { sampleCpuTick(1); }
+bool cpuIdle0() {
+  portENTER_CRITICAL(&cpuLoadMux); cpuIdleSeen[0] = true; portEXIT_CRITICAL(&cpuLoadMux);
+  return true;
+}
+bool cpuIdle1() {
+  portENTER_CRITICAL(&cpuLoadMux); cpuIdleSeen[1] = true; portEXIT_CRITICAL(&cpuLoadMux);
+  return true;
+}
+void updateCpuLoad() {
+  static unsigned long last = millis();
+  const unsigned long now = millis();
+  if (!cpuLoadReady || now-last < 5000UL) return;
+  last = now;
+  uint32_t total[2], busy[2];
+  portENTER_CRITICAL(&cpuLoadMux);
+  for (unsigned i=0; i<2; ++i) {
+    total[i]=cpuSampleTicks[i]; busy[i]=cpuBusyTicks[i];
+    cpuSampleTicks[i]=cpuBusyTicks[i]=0;
+  }
+  portEXIT_CRITICAL(&cpuLoadMux);
+  if (!total[0] || !total[1]) { snprintf(cpuLoadText,sizeof(cpuLoadText),"Nicht verfuegbar"); return; }
+  snprintf(cpuLoadText,sizeof(cpuLoadText),"Kern 0: ~%.0f %% / Kern 1: ~%.0f %%",
+           100.0*busy[0]/total[0],100.0*busy[1]/total[1]);
+}
+
 constexpr size_t WEB_STATUS_CAPACITY = 2048;
 char webStatusCache[WEB_STATUS_CAPACITY] = {};
 size_t webStatusLength = 0;
@@ -1181,6 +1224,15 @@ void refreshWebStatus() {
   values["tboiler"] = readTemperature(tBoiler);
   values["tkachelofen"] = readTemperature(tKachelofen);
   values["header-clock"] = processor("WEBTIME");
+  const uint64_t uptimeSeconds = static_cast<uint64_t>(esp_timer_get_time()) / 1000000ULL;
+  char uptimeText[64];
+  snprintf(uptimeText, sizeof(uptimeText), "%llu Tage %02u:%02u:%02u",
+           static_cast<unsigned long long>(uptimeSeconds / 86400ULL),
+           static_cast<unsigned>((uptimeSeconds / 3600ULL) % 24ULL),
+           static_cast<unsigned>((uptimeSeconds / 60ULL) % 60ULL),
+           static_cast<unsigned>(uptimeSeconds % 60ULL));
+  values["uptime"] = uptimeText;
+  values["cpu-load"] = cpuLoadText;
   values["brennersperre"] = sensorIsUsable(0) ? "Kesselsensor OK - keine Sensorsperre" : "BRENNER GESPERRT - Kesselsensor ungueltig";
   values["regelungsart"] = regelungsModus == REGELUNG_AUTO ? (AussentemperaturRegelung ? "AUTO / AUSSENTEMPERATUR" : "AUTO / RAUMTEMPERATUR") : (regelungsModus == REGELUNG_RAUM ? "MANUELL / RAUMTEMPERATUR" : "MANUELL / AUSSENTEMPERATUR");
   values["betriebsart"] = WinterBetrieb ? "AUTOMATIKBETRIEB" : BoilerBetrieb ? "NUR BOILER" : NurHeizung ? "NUR HEIZUNG" : "AUS";
@@ -1204,6 +1256,16 @@ void refreshWebStatus() {
 }
 
 void setup() {
+  const bool idle0 = esp_register_freertos_idle_hook_for_cpu(cpuIdle0,0) == ESP_OK;
+  const bool idle1 = esp_register_freertos_idle_hook_for_cpu(cpuIdle1,1) == ESP_OK;
+  const bool tick0 = esp_register_freertos_tick_hook_for_cpu(cpuTick0,0) == ESP_OK;
+  const bool tick1 = esp_register_freertos_tick_hook_for_cpu(cpuTick1,1) == ESP_OK;
+  cpuLoadReady = idle0 && idle1 && tick0 && tick1;
+  if (!cpuLoadReady) {
+    esp_deregister_freertos_idle_hook(cpuIdle0); esp_deregister_freertos_idle_hook(cpuIdle1);
+    esp_deregister_freertos_tick_hook(cpuTick0); esp_deregister_freertos_tick_hook(cpuTick1);
+    snprintf(cpuLoadText,sizeof(cpuLoadText),"Nicht verfuegbar");
+  }
   mqttMessageQueue = xQueueCreate(MQTT_QUEUE_LENGTH, sizeof(PendingMqttMessage));
 
   Serial.begin(BAUD_RATE);
@@ -1782,6 +1844,7 @@ else {sensorDS1820_read(bWhichSensor);} //ds_neu
    timer2_ntp.update();
    timer3_mqttupdate.update();
   esp_task_wdt_reset(); //watchdog Zeit wieder rücksetzen
+  updateCpuLoad();
   refreshWebStatus();
 }//end of loop()
 

@@ -10,11 +10,12 @@ https://wiki.ta.co.at/Heizkreisregelung_(Funktion)
 https://github.com/fedorweems/YouTube/blob/Arduino-Game-V1/ESP8266%20Home%20Automation%20MQTT%20-%20Arduino
 */
 #include <Arduino.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/queue.h>
 #include <ESPAsyncWebServer.h>
-#include <AsyncElegantOTA.h>
+#include <ElegantOTA.h>
 #include <math.h>
 #include <WiFi.h>
-#include <ESP32Ping.h>
 #include <esp_task_wdt.h>
 #include <time.h> // Clock einbinden
 #include <AsyncTCP.h>
@@ -23,9 +24,9 @@ https://github.com/fedorweems/YouTube/blob/Arduino-Game-V1/ESP8266%20Home%20Auto
 #include <Wire.h>
 #include <OneWire.h> //fuer DS18B20
 #include <EEPROM.h>
+#include <Preferences.h>
 #include <Keypad_I2C.h>
 #include <Ticker.h>
-#include <Timezone.h>
 #include <Update.h>
 #include <ArduinoJson.h>
 
@@ -114,6 +115,7 @@ volatile bool temp_update=false;
 float tVorlauf,tAussen,tKessel,tKesselDest,tKesselDiff,tBoiler,tBoilerDest,tBoilerDiff,tRoom,tRoomTag,tRoomDiff,
   tRoomNacht;
 float vorlaufTemperatur; // errechnete vorlaufTemperatur für Regelung
+bool heizkurveGueltig = false;
 float tmyRoomdest;//Zieltemperature je nach Tageszeit
 byte WinterBetrieb,BoilerBetrieb,NurHeizung;
 int AussentemperaturRegelung,AussentemperaturRegelungAlt = 0;
@@ -137,7 +139,7 @@ float tvmax,taumin,n;
 // V2 Kachelofen-Erkennung (externer Sensor via MQTT)
 // Der Kachelofen ist hydraulisch nicht mit der Heizung verbunden.
 // Seine Temperatur entscheidet nur, ob Raum- oder Aussentemperaturregelung aktiv ist.
-static const char KACHELOFEN_MQTT_TOPIC[] = "/SmartHome/Test/Heizung/kachelofenTemp";
+static const char KACHELOFEN_MQTT_TOPIC[] = MQTT_TEXT "kachelofenTemp";
 float tKachelofen = NAN;
 bool kachelofenAktiv = false;
 unsigned long kachelofenLastUpdate = 0;
@@ -146,6 +148,9 @@ float kachelofenAusTemp = 40.0;
 const unsigned long kachelofenTimeout = 10UL * 60UL * 1000UL;
 enum RegelungsModus { REGELUNG_AUTO, REGELUNG_RAUM, REGELUNG_AUSSEN };
 RegelungsModus regelungsModus = REGELUNG_AUTO;
+volatile int requestedWebMode = -1;
+int requestedOperatingMode = -1;
+portMUX_TYPE operatingModeMux = portMUX_INITIALIZER_UNLOCKED;
 
 unsigned int jumptoDefault = 0;
 char jump = '0';
@@ -169,7 +174,7 @@ static AsyncMqttClient asyncMqttClient;
 uint8_t my_str[6]; // sting to store the incoming data from the publisher
 //void callback(char* topic, byte* payload, unsigned int length);
 //PubSubClient client(MqttServer, 1883, callback, net);
-char mqtt_payload[10];
+char mqtt_payload[32];
 bool mqtt2update=false;
 int mqtt_message=0;
 /* *******************************************************************************************************
@@ -191,8 +196,9 @@ const char index_html[] PROGMEM = R"rawliteral(
 * { box-sizing: border-box; }
 html { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #20343c; text-align: left; }
 body { margin: 0; background: #f1f5f6; line-height: 1.5; }
-.topnav { background: #163b45; padding: 28px 24px; border-bottom: 4px solid #36b6a5; }
-.topnav h1 { max-width: 1120px; margin: 0 auto; font-size: clamp(1.2rem, 3vw, 1.8rem); line-height: 1.65; color: white; }
+.topnav { background: #163b45; padding: 14px 20px; border-bottom: 4px solid #36b6a5; }
+.topnav h1 { display: flex; align-items: center; justify-content: space-between; gap: 12px; max-width: 1120px; margin: 0 auto; font-size: clamp(.9rem, 2.5vw, 1.4rem); line-height: 1.4; color: white; white-space: nowrap; }
+.topnav time { font-size: inherit; font-weight: inherit; }
 .topnav hr { border: 0; border-top: 1px solid #ffffff30; margin: 10px 0; }
 .layout { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; max-width: 1168px; margin: 20px auto; padding: 0 24px; }
 .layout > p, body > p { display: none; }
@@ -217,15 +223,17 @@ form { line-height: 2; font-size: .9rem; }
 @media (max-width: 540px) { .layout { grid-template-columns: 1fr; padding: 0 16px; gap: 12px; margin: 16px auto; } .topnav { padding: 20px 16px; } }
 
 /* Bedientasten fuer die Kachelofen-Schaltschwellen */
+.threshold-card { grid-column: span 1; }
+@media (max-width: 540px) { .threshold-card { grid-column: span 1; } }
 .threshold-form { line-height: 1.5; }
 .threshold-form label { display: block; margin: 18px 0 8px; font-size: .85rem; font-weight: 600; color: #536b74; }
-.threshold-row { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; gap: 8px; align-items: center; }
-.threshold-row button { height: 44px; border: 1px solid #b9d7d2; border-radius: 9px; background: #eaf5f2; color: #126a5f; font: inherit; font-size: 1.4rem; cursor: pointer; }
+.threshold-row { display: grid; grid-template-columns: 32px minmax(0, 1fr) 32px; gap: 4px; align-items: center; }
+.threshold-row button { height: 38px; border: 1px solid #b9d7d2; border-radius: 9px; background: #eaf5f2; color: #126a5f; font: inherit; font-size: 1.4rem; cursor: pointer; }
 .threshold-row button:hover { background: #d8eee7; }
-.threshold-value { display: flex; align-items: center; justify-content: center; gap: 4px; }
-.threshold-value input[type="number"] { width: 100%; min-width: 0; max-width: 86px; margin: 0; padding: 8px 0; border: 0; background: transparent; text-align: center; font-size: 1.6rem; font-weight: 700; color: #163b45; appearance: textfield; -moz-appearance: textfield; }
+.threshold-value { display: flex; align-items: center; justify-content: center; gap: 3px; min-width: 0; white-space: nowrap; }
+.threshold-value input[type="number"] { width: 5ch; min-width: 0; max-width: 100%; flex: 0 1 5ch; margin: 0; padding: 8px 0; border: 0; background: transparent; text-align: center; font-size: 1.2rem; font-weight: 700; color: #163b45; appearance: textfield; -moz-appearance: textfield; }
 .threshold-value input::-webkit-inner-spin-button, .threshold-value input::-webkit-outer-spin-button { appearance: none; margin: 0; }
-.threshold-value span { color: #607681; font-size: .9rem; }
+.threshold-value span { flex: 0 0 auto; white-space: nowrap; color: #607681; font-size: .9rem; }
 .threshold-hint { font-size: .78rem; color: #607681; margin: 16px 0; }
 .threshold-save { width: 100%; padding: 12px; border: 0; border-radius: 9px; background: #14796c; color: white; font: inherit; font-weight: 600; cursor: pointer; }
 .threshold-save:disabled { opacity: .5; cursor: default; }
@@ -238,25 +246,8 @@ form { line-height: 2; font-size: .9rem; }
 </head>
 <body>
   <div class="topnav">
-    <h1>ESP32 Heizung-Steuerung<hr>%TimeString%<hr>%MQTTUPDATE%</h1>
+    <h1><span>ESP32 Heizung</span><time id="header-clock">%WEBTIME%</time></h1>
   </div>
-  <section class="layout">
-  <div class="content">
-    <div class="card">
-      <h3>Heizungspumpe</h3>
-      <p class="state">state: <span id="state">%HEIZUNGSPUMPE%</span></p>
-      <p><button id="button" class="button">Toggle</button></p>
-    </div>
-  </div>
-  <div class="content">
-    <div class="card">
-      <h3>Boilerpumpe</h3>
-      <p class="state">state: <span id="state">%BOILERPUMPE%</span></p>
-      <p><button id="button" class="button">Toggle</button></p>
-    </div>
-  </div>
-  </section>
-  <p>
   <section class="layout">
   <div>
     <i class="fas fa-thermometer-half" style="color:#059e8a;"></i> 
@@ -274,6 +265,7 @@ form { line-height: 2; font-size: .9rem; }
     <i class="fas fa-thermometer-half" style="color:#059e8a;"></i> 
     <span class="dht-labels">Gaskessel</span> 
     <span id="tkessel">%TKESSEL%</span>
+    <div id="brennersperre" role="status">%BRENNERSPERRE%</div>
     <sup class="units">&deg;C</sup>
   </div>
   <div>
@@ -296,9 +288,41 @@ form { line-height: 2; font-size: .9rem; }
     <span id="tkachelofen">%TKACHELOFEN%</span>
     <sup class="units">&deg;C</sup>
   </div>
-  <div>Kachelofen: <strong>%KACHELOFENSTATUS%</strong></div>
-  <div>Regelung: <strong>%REGELUNGSART%</strong></div>
   <div>
+    <h3>Gasverbrauch heute</h3>
+    <strong id="gas-day">%GASDAY%</strong> m&sup3;
+    <p>Seit erster Meldung des Tages</p>
+    <small>Gesamtstand: <span id="gas-total">%GASTOTAL%</span> m&sup3;</small>
+  </div>
+  <div>Kachelofen: <strong>%KACHELOFENSTATUS%</strong></div>
+  <div>
+    <h3>Regelung</h3>
+    <strong id="regelungsart">%REGELUNGSART%</strong>
+    <form action="/regelung" method="post">
+      <p><label for="regelung-auswahl">Regelungsart ausw&auml;hlen</label></p>
+      <p><select id="regelung-auswahl" name="modus" style="width:100%;padding:12px;font:inherit;border:1px solid #cbd9dd;border-radius:8px">
+        <option value="auto" %MODEAUTO%>Automatik</option>
+        <option value="raum" %MODERAUM%>Raumtemperatur</option>
+        <option value="aussen" %MODEAUSSEN%>Au&szlig;entemperatur</option>
+      </select></p>
+      <button class="threshold-save" type="submit">&Uuml;bernehmen</button>
+    </form>
+  </div>
+  <div>
+    <h3>Betriebsart</h3>
+    <strong id="betriebsart">%BETRIEBSART%</strong>
+    <form action="/betriebsart" method="post">
+      <p><label for="betrieb-auswahl">Betriebsart ausw&auml;hlen</label></p>
+      <p><select id="betrieb-auswahl" name="modus" style="width:100%;padding:12px;font:inherit;border:1px solid #cbd9dd;border-radius:8px">
+        <option value="auto" %BETRIEBAUTO%>Automatikbetrieb</option>
+        <option value="boiler" %BETRIEBBOILER%>Nur Boiler</option>
+        <option value="heizung" %BETRIEBHEIZUNG%>Nur Heizung</option>
+        <option value="aus" %BETRIEBAUS%>Aus</option>
+      </select></p>
+      <button class="threshold-save" type="submit">&Uuml;bernehmen</button>
+    </form>
+  </div>
+  <div class="threshold-card">
     <form class="threshold-form" action="/kachelofen" method="get">
   <h3>Kachelofen-Schaltschwellen</h3>
   <label for="threshold-ein">Aktiv ab</label>
@@ -330,6 +354,25 @@ function adjustThreshold(id, direction) {
 }
 </script>
   </div>
+  </section>
+  <section class="layout">
+  <div class="content">
+    <div class="card">
+      <h3>Heizungspumpe</h3>
+      <p class="state">state: <span id="state">%HEIZUNGSPUMPE%</span></p>
+      <p><button id="button" class="button">Toggle</button></p>
+    </div>
+  </div>
+  <div class="content">
+    <div class="card">
+      <h3>Boilerpumpe</h3>
+      <p class="state">state: <span id="state">%BOILERPUMPE%</span></p>
+      <p><button id="button" class="button">Toggle</button></p>
+    </div>
+  </div>
+  </section>
+  <p>
+  <section class="layout">
   </section>
   <p>
   <section class="layout">
@@ -442,6 +485,56 @@ setInterval(function ( ) {
   xhttp.open("GET", "/tkachelofen", true);
   xhttp.send();
 }, 10000 ) ;
+
+function updateBrennerSensorLock() {
+  fetch('/brennersperre', {cache: 'no-store'})
+    .then(function(response) {
+      if (!response.ok) throw new Error('Status nicht erreichbar');
+      return response.text();
+    })
+    .then(function(status) { document.getElementById('brennersperre').textContent = status; })
+    .catch(function() { document.getElementById('brennersperre').textContent = 'Sperrstatus nicht erreichbar'; });
+}
+setInterval(updateBrennerSensorLock, 3000);
+
+var clockRequestPending = false;
+function updateHeaderClock() {
+  if (clockRequestPending) return;
+  clockRequestPending = true;
+  var request = new XMLHttpRequest();
+  request.open('GET', '/uhrzeit?tick=' + Date.now(), true);
+  request.timeout = 2500;
+  request.onload = function() {
+    if (request.status === 200) document.getElementById('header-clock').textContent = request.responseText;
+  };
+  request.onloadend = function() { clockRequestPending = false; };
+  request.send();
+}
+setInterval(updateHeaderClock, 1000);
+updateHeaderClock();
+
+setInterval(function() {
+  fetch('/betriebsart', {cache: 'no-store'})
+    .then(function(response) { if (!response.ok) throw new Error(); return response.text(); })
+    .then(function(text) { document.getElementById('betriebsart').textContent = text; })
+    .catch(function() { document.getElementById('betriebsart').textContent = 'Betriebsstatus nicht erreichbar'; });
+}, 3000);
+
+setInterval(function() {
+  fetch('/regelungsart', {cache: 'no-store'})
+    .then(function(response) { if (!response.ok) throw new Error(); return response.text(); })
+    .then(function(text) { document.getElementById('regelungsart').textContent = text; })
+    .catch(function() { document.getElementById('regelungsart').textContent = 'Regelungsstatus nicht erreichbar'; });
+}, 3000);
+
+setInterval(function() {
+  [['/gas?daily=1', 'gas-day'], ['/gas', 'gas-total']].forEach(function(item) {
+    fetch(item[0], {cache: 'no-store'})
+      .then(function(response) { if (!response.ok) throw new Error(); return response.text(); })
+      .then(function(text) { document.getElementById(item[1]).textContent = text; })
+      .catch(function() { document.getElementById(item[1]).textContent = 'Nicht erreichbar'; });
+  });
+}, 10000);
 </script>
 </body>
 </html>)rawliteral";
@@ -501,7 +594,28 @@ volatile bool readSensor = false;
                                          LCD I2C
 ******************************************************************************************************* */
 volatile int lcd_display_light = 30;
-LiquidCrystal_I2C lcd(lcd_addr, 20, 4); //0x3F wird ersetzt - Davor den i2c scanner laufen lassen!!! 16 Zeichen, 2 Zeilen
+bool lcdPresent = false;
+bool keypadPresent = false;
+bool ioExtenderPresent = false;
+
+// Auch print/printf laufen ueber write: ohne Display keine Buszugriffe.
+class OptionalLCD : public LiquidCrystal_I2C {
+public:
+  OptionalLCD(uint8_t address, uint8_t columns, uint8_t rows)
+    : LiquidCrystal_I2C(address, columns, rows) {}
+  void begin() { if (lcdPresent) LiquidCrystal_I2C::begin(); }
+  void clear() { if (lcdPresent) LiquidCrystal_I2C::clear(); }
+  void setCursor(uint8_t column, uint8_t row) {
+    if (lcdPresent) LiquidCrystal_I2C::setCursor(column, row);
+  }
+  void setBacklight(uint8_t value) {
+    if (lcdPresent) LiquidCrystal_I2C::setBacklight(value);
+  }
+  size_t write(uint8_t value) override {
+    return lcdPresent ? LiquidCrystal_I2C::write(value) : 1;
+  }
+};
+OptionalLCD lcd(lcd_addr, 20, 4); //0x3F wird ersetzt - Davor den i2c scanner laufen lassen!!! 16 Zeichen, 2 Zeilen
 // Pin 4, 5 (D2, D1) für I2C
 /* *******************************************************************************************************
                                          Keypad
@@ -619,13 +733,13 @@ volatile byte bWhichSensor = 0;//This variable was called "count"
 //from readTturePt1, Pt2, and to send data to printTture...
 //See webpage for what they hold.
 
-int TReading[kTtureSensorMaxIndex], SignBit[kTtureSensorMaxIndex],
-        Whole[kTtureSensorMaxIndex],Fract[kTtureSensorMaxIndex];
+int TReading[kTtureSensorMaxIndex+1], SignBit[kTtureSensorMaxIndex+1],
+        Whole[kTtureSensorMaxIndex+1],Fract[kTtureSensorMaxIndex+1];
 //Whole[] holds the ABSOLUTE VALUE of the integer part
 //  of the reading. E.g. for either 12.7 r -12.7, Whole
 //  holds 12. (SignBit[] tells you if it is +ve or -ve.)
 
-float fTc_100[kTtureSensorMaxIndex];
+float fTc_100[kTtureSensorMaxIndex+1];
 
 
 /* *******************************************************************************************************
@@ -646,8 +760,9 @@ void onMqttDisconnect(AsyncMqttClientDisconnectReason reason);
 void onMqttSubscribe(uint16_t packetId, uint8_t qos);
 void connectToMqtt();
 void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total);
+void processMqttMessages();
 void connectToWifi();
-void OneWireReset(int Pin);
+bool OneWireReset(int Pin);
 void OneWireOutByte(int Pin, byte d);
 byte OneWireInByte(int Pin);
 void readTturePt1(byte Pin);
@@ -687,6 +802,8 @@ void MenuHeizbeginnTag();
 void MenuHeizEndeNacht();
 void Time2LCD();
 void SetOutPin();
+bool heatingPumpSensorFault();
+bool boilerPumpSensorFault();
 void kein_Betrieb();
 int chckKessel();
 void chckRoom();
@@ -705,6 +822,7 @@ void MischerInit();
 void MischerAuf();
 void MischerZu();
 void MischerStop();
+bool enforceVorlaufSensorLock();
 void SetToRT_Regelung();
 void sensorDS1820_indicateChip(byte pin);
 void sensorDS1820_reset(byte pin);
@@ -731,6 +849,223 @@ char doppelp = ' ';
 /* *******************************************************************************************************
                                          SETUP
 ******************************************************************************************************* */
+// Sensorstatus ist getrennt vom letzten Messwert, damit Fehler sichtbar bleiben.
+const unsigned long SENSOR_MAX_AGE_MS = 30000UL;
+bool sensorReadingValid[5] = {};
+unsigned long sensorLastSuccess[5] = {};
+const char* sensorNames[5] = {"Kessel", "Vorlauf", "Aussen", "Raum", "Boiler"};
+
+Preferences gasStorage;
+bool gasStorageReady = false;
+double gasTotal = NAN;
+double gasDayBase = NAN;
+int gasDayKey = 0;
+bool gasDayReady = false;
+portMUX_TYPE gasMux = portMUX_INITIALIZER_UNLOCKED;
+double pendingGasTotal = 0;
+bool pendingGas = false;
+bool pendingGasRetained = false;
+
+int currentGasDay() {
+  const time_t utc = time(nullptr);
+  if (utc < static_cast<time_t>(1577836800UL)) return 0;
+  time_t local = utc + GMT_TIME_ZONE * utcOffsetInSeconds;
+  struct tm calendar = {};
+  if (!gmtime_r(&local, &calendar)) return 0;
+  if (Sommerzeit_EinAus && summertime_EU(calendar.tm_year + 1900,
+      calendar.tm_mon + 1, calendar.tm_mday, calendar.tm_hour, GMT_TIME_ZONE)) {
+    local += 3600;
+    if (!gmtime_r(&local, &calendar)) return 0;
+  }
+  return (calendar.tm_year + 1900) * 10000 + (calendar.tm_mon + 1) * 100 + calendar.tm_mday;
+}
+
+void processGasReading() {
+  double value;
+  bool retained;
+  portENTER_CRITICAL(&gasMux);
+  const bool available = pendingGas;
+  value = pendingGasTotal;
+  retained = pendingGasRetained;
+  pendingGas = false;
+  portEXIT_CRITICAL(&gasMux);
+  const int day = currentGasDay();
+  if (day != gasDayKey) gasDayReady = false;
+  if (!available) return;
+  if ((isfinite(gasTotal) && value < gasTotal) ||
+      (day == gasDayKey && isfinite(gasDayBase) && value < gasDayBase)) {
+    Serial.println("Gaszaehler: ruecklaeufigen Stand verworfen");
+    return;
+  }
+  gasTotal = value;
+  if (day == 0) return;
+  if (day != gasDayKey || !isfinite(gasDayBase)) {
+    // Ein alter Retain-Wert ist keine neue Tagesmessung.
+    if (retained) return;
+    gasDayKey = day;
+    gasDayBase = value;
+    if (gasStorageReady) {
+      gasStorage.putDouble("base", gasDayBase);
+      gasStorage.putInt("day", gasDayKey);
+    }
+  }
+  gasDayReady = true;
+}
+
+String gasDisplay(bool daily) {
+  if (!isfinite(gasTotal)) return "Noch keine Meldung";
+  if (daily && (!gasDayReady || gasDayKey != currentGasDay())) return "Warte auf Tagesmessung";
+  char text[32];
+  snprintf(text, sizeof(text), "%.3f", daily ? gasTotal - gasDayBase : gasTotal);
+  return String(text);
+}
+
+enum BoilerDiagnostic { BOILER_WAITING, BOILER_OK, BOILER_NO_RESPONSE, BOILER_ZERO_DATA, BOILER_HIGH_DATA,
+                        BOILER_BAD_CRC, BOILER_BAD_VALUE };
+volatile BoilerDiagnostic boilerDiagnostic = BOILER_WAITING;
+byte boilerRawBytes[9] = {};
+bool boilerRawAvailable = false;
+portMUX_TYPE boilerDiagnosticMux = portMUX_INITIALIZER_UNLOCKED;
+
+
+const char* boilerDiagnosticText() {
+  switch (boilerDiagnostic) {
+    case BOILER_NO_RESPONSE: return "Keine Sensorantwort bei Anwesenheitspruefung";
+    case BOILER_ZERO_DATA: return "Datenblock durchgehend Null";
+    case BOILER_HIGH_DATA: return "Datenblock durchgehend 255";
+    case BOILER_BAD_CRC: return "Pruefsumme fehlerhaft";
+    case BOILER_BAD_VALUE: return "Temperaturwert ungueltig";
+    case BOILER_OK:
+      return (unsigned long)(millis() - sensorLastSuccess[4]) > SENSOR_MAX_AGE_MS ?
+        "Letzter gueltiger Messwert zu alt" : "Messung gueltig";
+    default: return "Warte auf erste Boiler-Messung";
+  }
+}
+
+String boilerDiagnosticDetails() {
+  byte bytes[9];
+  bool available;
+  portENTER_CRITICAL(&boilerDiagnosticMux);
+  memcpy(bytes, boilerRawBytes, sizeof(bytes));
+  available = boilerRawAvailable;
+  portEXIT_CRITICAL(&boilerDiagnosticMux);
+  String text = boilerDiagnosticText();
+  if (available) {
+    char raw[40];
+    snprintf(raw, sizeof(raw), "%02X %02X %02X %02X %02X %02X %02X %02X %02X",
+             bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7], bytes[8]);
+    text += " | Letzter gelesener Datenblock (Hex): ";
+    text += raw;
+  }
+  return text;
+}
+
+bool sensorIsUsable(byte index) {
+  return index < 5 && sensorReadingValid[index] &&
+         millis() - sensorLastSuccess[index] <= SENSOR_MAX_AGE_MS;
+}
+
+// Status bei Aenderung und nach Wiederverbindung erneut senden.
+void publishSensorStates() {
+  static bool published[5] = {};
+  static bool lastValid[5] = {};
+  static float lastTemperature[5] = {};
+  static unsigned long lastAttempt = 0;
+  if (!asyncMqttClient.connected()) {
+    for (byte i = 0; i < 5; ++i) published[i] = false;
+    return;
+  }
+  if (millis() - lastAttempt < 1000UL) return;
+  lastAttempt = millis();
+  static String lastBoilerReason;
+  const String boilerReason = boilerDiagnosticText();
+  if (!published[4] || boilerReason != lastBoilerReason) {
+    const String diagnosticTopic = String(MQTT_TEXT) + "sensordiagnose/boiler";
+    if (asyncMqttClient.publish(diagnosticTopic.c_str(), 1, true, boilerReason.c_str()) != 0)
+      lastBoilerReason = boilerReason;
+  }
+  const char* suffixes[5] = {"kessel", "vorlauf", "aussen", "raum", "boiler"};
+  const float* values[5] = {&tKessel, &tVorlauf, &tAussen, &tRoom, &tBoiler};
+  for (byte i = 0; i < 5; ++i) {
+    const float temperature = *values[i];
+    const bool valid = sensorIsUsable(i) && isfinite(temperature);
+    if (published[i] && valid == lastValid[i] &&
+        (!valid || temperature == lastTemperature[i])) continue;
+    const String topic = String(MQTT_TEXT) + "sensorstatus/" + suffixes[i];
+    char message[32];
+    if (valid) snprintf(message, sizeof(message), "%.1f", temperature);
+    else snprintf(message, sizeof(message), "SENSORFEHLER");
+    if (asyncMqttClient.publish(topic.c_str(), 1, true, message) != 0) {
+      published[i] = true;
+      lastValid[i] = valid;
+      lastTemperature[i] = temperature;
+    }
+  }
+}
+
+void publishBrennerSensorLock() {
+  static bool published = false;
+  static bool lastLocked = false;
+  static unsigned long lastAttempt = 0;
+  if (!asyncMqttClient.connected()) { published = false; return; }
+  const bool locked = !sensorIsUsable(0);
+  if (published && locked == lastLocked) return;
+  if (millis() - lastAttempt < 1000UL) return;
+  lastAttempt = millis();
+  const String topic = String(MQTT_TEXT) + "brennersperre";
+  const char* message = locked ? "BRENNER GESPERRT - Kesselsensor ungueltig" :
+                                 "Kesselsensor OK - keine Sensorsperre";
+  if (asyncMqttClient.publish(topic.c_str(), 1, true, message) != 0) {
+    lastLocked = locked;
+    published = true;
+  }
+}
+
+void enforceKesselSensorLock() {
+  static bool lastLocked = false;
+  const bool locked = !sensorIsUsable(0);
+  if (locked) {
+    BrennerRelais = false;
+    digitalWrite(BrennerPin, LOW);
+  }
+  if (locked != lastLocked) {
+    Serial.println(locked ? "Brenner gesperrt: Kesselsensor ungueltig" :
+                            "Kesselsensor gueltig: Brennersperre aufgehoben");
+    lastLocked = locked;
+  }
+}
+
+bool validSensorScratchpad(const byte* data) {
+  bool allZero = true;
+  bool allHigh = true;
+  for (byte i = 0; i < 9; ++i) {
+    allZero &= (data[i] == 0);
+    allHigh &= (data[i] == 0xff);
+  }
+  return !allZero && !allHigh && OneWire::crc8(data, 8) == data[8];
+}
+
+void markSensorFailure(byte index) {
+  if (index >= 5) return;
+  if (sensorReadingValid[index] || sensorLastSuccess[index] == 0)
+    Serial.printf("Sensorfehler: %s\n", sensorNames[index]);
+  sensorReadingValid[index] = false;
+}
+
+bool markSensorSuccess(byte index, float temperature) {
+  if (index >= 5) return false;
+  if (!isfinite(temperature) || temperature < -55.0f || temperature > 125.0f) {
+    if (index == 4) boilerDiagnostic = BOILER_BAD_VALUE;
+    markSensorFailure(index);
+    return false;
+  }
+  if (!sensorReadingValid[index]) Serial.printf("Sensor wieder gueltig: %s\n", sensorNames[index]);
+  if (index == 4) boilerDiagnostic = BOILER_OK;
+  sensorReadingValid[index] = true;
+  sensorLastSuccess[index] = millis();
+  return true;
+}
+
 // Bestehende Einstellungen erhalten; uninitialisierte Werte einzeln reparieren.
 template <typename T>
 bool repairSetting(int address, T fallback, double minimum, double maximum) {
@@ -778,7 +1113,20 @@ void initializeStoredSettings() {
   if (changed && !EEPROM.commit()) Serial.println("Einstellungen konnten nicht gespeichert werden");
 }
 
+
+struct PendingMqttMessage {
+  char topic[128];
+  char payload[64];
+  AsyncMqttClientMessageProperties properties;
+  size_t length;
+  unsigned long receivedAt;
+};
+constexpr unsigned MQTT_QUEUE_LENGTH = 8;
+QueueHandle_t mqttMessageQueue = nullptr;
+
 void setup() {
+  mqttMessageQueue = xQueueCreate(MQTT_QUEUE_LENGTH, sizeof(PendingMqttMessage));
+
   Serial.begin(BAUD_RATE);
   esp_task_wdt_init(WDT_TIMEOUT, true); //disable panic so ESP32 restarts
   esp_task_wdt_add(NULL); //add current thread to WDT watch
@@ -794,8 +1142,12 @@ void setup() {
     while (true) { delay(1000); }
   }
   initializeStoredSettings();
+  gasStorageReady = gasStorage.begin("gas-meter", false);
+  if (gasStorageReady) {
+    gasDayBase = gasStorage.getDouble("base", NAN);
+    gasDayKey = gasStorage.getInt("day", 0);
+  }
 
-  delay(6000);//Wait for newly restarted system to stabilize
 
 //float tVorlauf,tAussen,tKessel,tKesselDest,tKesselDiff,tBoiler,tBoilerDest,tBoilerDiff,tRoom,tRoomTag,tRoomDiff;
   EEPROM.get( EEADDRESS_BOILER, tBoilerDest );
@@ -883,8 +1235,18 @@ void setup() {
   EEPROM.get( EEADDRESS_SOMMERZEIT_EINAUS, Sommerzeit_EinAus );
   Serial.println(Sommerzeit_EinAus);
   Serial.print("-Sommerzeit_EinAus");
-  delay(6000);
-  Wire.begin(); //I2C ESP32 -> SDA (default is GPIO 21), SCL (default is GPIO 22)
+  Wire.begin();
+  auto hardwarePresent = [](uint8_t address) {
+    Wire.beginTransmission(address);
+    return Wire.endTransmission() == 0;
+  };
+  lcdPresent = hardwarePresent(lcd_addr);
+  keypadPresent = hardwarePresent(keypad_addr);
+  ioExtenderPresent = hardwarePresent(ioextender0_addr);
+  Serial.printf("Zusatzhardware: Display %s, Tastatur %s, Erweiterung %s\n",
+                lcdPresent ? "vorhanden" : "fehlt", keypadPresent ? "vorhanden" : "fehlt",
+                ioExtenderPresent ? "vorhanden" : "fehlt");
+  //I2C ESP32 -> SDA (default is GPIO 21), SCL (default is GPIO 22)
 // i2c ioextender
   ioextender0_indicate = 0b11111111;
   I2C_IO_Init(ioextender0_addr,ioextender0_indicate);
@@ -892,8 +1254,8 @@ void setup() {
   lcd.begin();
   lcd.setBacklight(HIGH);
   //MenueBooting();
-  I2C_Keypad.begin();
-  delay(1000);
+  if (keypadPresent) I2C_Keypad.begin();
+  if (lcdPresent || keypadPresent || ioExtenderPresent) delay(1000);
    //For each tture sensor: Do a pinMode and a digitalWrite
    for (bLoopCounter = 0;
      bLoopCounter <= kTtureSensorMaxIndex;
@@ -924,9 +1286,7 @@ void setup() {
    Serial.println("*************************************************");
    Serial.println("\n\n\n");
    // Configures static IP address
-//  if (!WiFi.config(local_IP, gateway, subnet, primaryDNS, secondaryDNS)) {
-//    Serial.println("STA Failed to configure");
-//  }
+  // Production address is assigned by the router via DHCP.
    Serial.print("Connecting to :");
    Serial.println(ssid);
    WiFi.onEvent(WiFiEvent);
@@ -978,13 +1338,55 @@ void setup() {
     "TimeString", "MQTTUPDATE", "HEIZUNGSPUMPE", "BOILERPUMPE",
     "TROOM", "TAUSSEN", "TKESSEL", "TVORLAUF", "TBOILER",
     "TKACHELOFEN", "KACHELOFENSTATUS", "REGELUNGSART",
-    "KACHELOFENEIN", "KACHELOFENAUS", "WIFISSID", "WIFIRSSI"
+    "KACHELOFENEIN", "KACHELOFENAUS", "WIFISSID", "WIFIRSSI", "BRENNERSPERRE", "WEBTIME", "MODEAUTO", "MODERAUM", "MODEAUSSEN", "GASDAY", "GASTOTAL", "BETRIEBSART", "BETRIEBAUTO", "BETRIEBBOILER", "BETRIEBHEIZUNG", "BETRIEBAUS"
   };
   for (const char* name : placeholders) {
     page.replace(String("%") + name + "%", processor(String(name)));
   }
   request->send(200, "text/html; charset=utf-8", page);
 });
+  server.on("/gas", HTTP_GET, [](AsyncWebServerRequest *request){
+    const bool daily = request->hasParam("daily");
+    request->send(200, "text/plain; charset=utf-8", gasDisplay(daily));
+  });
+  server.on("/betriebsart", HTTP_POST, [](AsyncWebServerRequest *request){
+    if (!request->hasParam("modus", true)) {
+      request->send(400, "text/plain", "Betriebsart fehlt"); return;
+    }
+    const String value = request->getParam("modus", true)->value();
+    const int mode = value == "auto" ? 0 : value == "boiler" ? 1 : value == "heizung" ? 2 : value == "aus" ? 3 : -1;
+    if (mode < 0) { request->send(400, "text/plain", "Ungueltige Betriebsart"); return; }
+    portENTER_CRITICAL(&operatingModeMux);
+    requestedOperatingMode = mode;
+    portEXIT_CRITICAL(&operatingModeMux);
+    request->redirect("/");
+  });
+  server.on("/betriebsart", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send(200, "text/plain; charset=utf-8", processor("BETRIEBSART"));
+  });
+  server.on("/regelung", HTTP_POST, [](AsyncWebServerRequest *request){
+    if (!request->hasParam("modus", true)) {
+      request->send(400, "text/plain", "Regelungsart fehlt"); return;
+    }
+    const String mode = request->getParam("modus", true)->value();
+    if (mode == "auto") requestedWebMode = REGELUNG_AUTO;
+    else if (mode == "raum") requestedWebMode = REGELUNG_RAUM;
+    else if (mode == "aussen") requestedWebMode = REGELUNG_AUSSEN;
+    else { request->send(400, "text/plain", "Ungueltige Regelungsart"); return; }
+    request->redirect("/");
+  });
+  server.on("/regelungsart", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send(200, "text/plain; charset=utf-8", processor("REGELUNGSART"));
+  });
+  server.on("/uhrzeit", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send(200, "text/plain; charset=utf-8", processor("WEBTIME"));
+  });
+  server.on("/boilerdiagnose", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send(200, "text/plain; charset=utf-8", boilerDiagnosticDetails());
+  });
+  server.on("/brennersperre", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send(200, "text/plain; charset=utf-8", processor("BRENNERSPERRE"));
+  });
   server.on("/tkachelofen", HTTP_GET, [](AsyncWebServerRequest *request){
     request->send(200, "text/plain", readTemperature(tKachelofen));
   });
@@ -1017,7 +1419,7 @@ void setup() {
     request->redirect("/");
   });
   // Start ElegantOTA
-  AsyncElegantOTA.begin(&server);
+  ElegantOTA.begin(&server);
   server.begin();
   esp_task_wdt_reset(); //watchdog Zeit rücksetzen
   serial_clear_screen();
@@ -1028,6 +1430,33 @@ void setup() {
                                          MAIN LOOP
 ******************************************************************************************************* */
 void loop(){
+  ElegantOTA.loop();
+  processMqttMessages();
+  processGasReading();
+  portENTER_CRITICAL(&operatingModeMux);
+  const int operatingMode = requestedOperatingMode;
+  requestedOperatingMode = -1;
+  portEXIT_CRITICAL(&operatingModeMux);
+  if (operatingMode >= 0 && operatingMode <= 3) {
+    WinterBetrieb = operatingMode == 0;
+    BoilerBetrieb = operatingMode == 1;
+    NurHeizung = operatingMode == 2;
+    Betriebsart = operatingMode == 0 ? 'A' : operatingMode == 1 ? 'B' : operatingMode == 2 ? 'H' : '0';
+    EEPROM.put(EEADDRESS_WINTER, WinterBetrieb);
+    EEPROM.put(EEADDRESS_BOILER_SOMMERBETRIEB, BoilerBetrieb);
+    EEPROM.put(EEADDRESS_NUR_HEIZUNG, NurHeizung);
+    EEPROM.commit();
+  }
+  const int webMode = requestedWebMode;
+  if (webMode >= 0) {
+    requestedWebMode = -1;
+    regelungsModus = static_cast<RegelungsModus>(webMode);
+    updateKachelofenStatus();
+  }
+  enforceKesselSensorLock();
+  enforceVorlaufSensorLock();
+  publishBrennerSensorLock();
+  publishSensorStates();
   static unsigned long lastWsCleanup = 0;
     const unsigned long wsNow = millis();
     if (wsNow - lastWsCleanup >= 1000UL) {
@@ -1036,6 +1465,7 @@ void loop(){
     }
   unsigned long currentTime;
   updateKachelofenStatus();
+  SetOutPin(); // Enforce pump fault deadlines on every loop pass.
   MischerInit();
   if(WinterBetrieb){
     Automatik();
@@ -1082,9 +1512,12 @@ void loop(){
       if(setup_sensorDS1820){sensorDS1820_indicateChip(bWhichSensor); setup_sensorDS1820--;}//Setup nur einmal beim Start ausführen
       sensorDS1820_reset(bWhichSensor);
    } //ds_neu
+    // Conversion time starts when the command has actually been sent.
+    previousTime = millis();
+    currentTime = previousTime;
     readSensor = true;
   }
-  if (currentTime - previousTime > ANSWER_TIME){ //delay 1900
+  if (readSensor && (unsigned long)(currentTime - previousTime) > ANSWER_TIME){ //delay 1900
     if (lcd_display_light){
       lcd.setBacklight(HIGH);
       lcd_display_light--;
@@ -1096,7 +1529,7 @@ void loop(){
 //ds_alt      printTture();//N.B.: Takes values from globals.
 if (bWhichSensor==BOILER_NUMBER){
 readTturePt2(tture[bWhichSensor],bWhichSensor);
-printTture();}
+}
 else {sensorDS1820_read(bWhichSensor);} //ds_neu
       delay(5);//war 50
       bWhichSensor++;
@@ -1175,6 +1608,7 @@ else {sensorDS1820_read(bWhichSensor);} //ds_neu
                                          KeyPad
 ******************************************************************************************************* */
 void KeyPad(){
+  if (!keypadPresent) return;
   // Gedrückte Taste abfragen
     char i2cKey = I2C_Keypad.getKey();
     if (i2cKey) {
@@ -1538,10 +1972,10 @@ void MenuRoomTemp() {
   lcd.setCursor(0,1);
   lcd.print("2  BoilerTemp");
   lcd.setCursor(0,2);
-  char float_str[8];
+  char float_str[32];
   char line0[21];
-  dtostrf(tRoomTag,4,2,float_str);
-  sprintf(line0, "TempNow: %-9sC", float_str); // %6s right pads the string
+  snprintf(float_str, sizeof(float_str), "%4.2f", static_cast<double>(tRoomTag));
+  snprintf(line0, sizeof(line0), "TempNow: %-9sC", float_str); // %6s right pads the string
   lcd.print(line0);
   memset(keyBuffer, 0, sizeof keyBuffer);//Der Buffer wird geloescht
   jumptoDefault=60;
@@ -1553,10 +1987,10 @@ void MenuBoilerTemp() {
   lcd.setCursor(0,1);
   lcd.print("3  KesselTemp");
   lcd.setCursor(0,2);
-  char float_str[8];
+  char float_str[32];
   char line0[21];
-  dtostrf(tBoilerDest,4,2,float_str);
-  sprintf(line0, "TempNow: %-9sC", float_str);
+  snprintf(float_str, sizeof(float_str), "%4.2f", static_cast<double>(tBoilerDest));
+  snprintf(line0, sizeof(line0), "TempNow: %-9sC", float_str);
   lcd.print(line0);
   memset(keyBuffer, 0, sizeof keyBuffer);//Der Buffer wird geloescht
   jumptoDefault=60;
@@ -1568,10 +2002,10 @@ void MenuKesseltemp() {
   lcd.setCursor(0,1);
   lcd.print("4  DiffRaumtemp");
   lcd.setCursor(0,2);
-  char float_str[8];
+  char float_str[32];
   char line0[21];
-  dtostrf(tKesselDest,4,2,float_str);
-  sprintf(line0, "TempNow: %-9sC", float_str);
+  snprintf(float_str, sizeof(float_str), "%4.2f", static_cast<double>(tKesselDest));
+  snprintf(line0, sizeof(line0), "TempNow: %-9sC", float_str);
   lcd.print(line0);
   memset(keyBuffer, 0, sizeof keyBuffer);//Der Buffer wird geloescht
   jumptoDefault=60;
@@ -1583,10 +2017,10 @@ void MenuDifRaumtemp() {
   lcd.setCursor(0,1);
   lcd.print("5  DiffKesselTemp");
   lcd.setCursor(0,2);
-  char float_str[8];
+  char float_str[32];
   char line0[21];
-  dtostrf(tRoomDiff,4,2,float_str);
-  sprintf(line0, "TempNow: %-9sC", float_str);
+  snprintf(float_str, sizeof(float_str), "%4.2f", static_cast<double>(tRoomDiff));
+  snprintf(line0, sizeof(line0), "TempNow: %-9sC", float_str);
   lcd.print(line0);
   memset(keyBuffer, 0, sizeof keyBuffer);//Der Buffer wird geloescht
   jumptoDefault=60;
@@ -1598,10 +2032,10 @@ void MenuDifKesseltemp() {
   lcd.setCursor(0,1);
   lcd.print("6  RaumNachtTemp");
   lcd.setCursor(0,2);
-  char float_str[8];
+  char float_str[32];
   char line0[21];
-  dtostrf(tKesselDiff,4,2,float_str);
-  sprintf(line0, "TempNow: %-9sC", float_str);
+  snprintf(float_str, sizeof(float_str), "%4.2f", static_cast<double>(tKesselDiff));
+  snprintf(line0, sizeof(line0), "TempNow: %-9sC", float_str);
   lcd.print(line0);
   memset(keyBuffer, 0, sizeof keyBuffer);//Der Buffer wird geloescht
   jumptoDefault=60;
@@ -1613,10 +2047,10 @@ void MenuRaumTempNacht(){
   lcd.setCursor(0,1);
   lcd.print("7  WinterBetrieb");
   lcd.setCursor(0,2);
-  char float_str[8];
+  char float_str[32];
   char line0[21];
-  dtostrf(tRoomNacht,4,2,float_str);
-  sprintf(line0, "TempNow: %-9sC", float_str);
+  snprintf(float_str, sizeof(float_str), "%4.2f", static_cast<double>(tRoomNacht));
+  snprintf(line0, sizeof(line0), "TempNow: %-9sC", float_str);
   lcd.print(line0);
   memset(keyBuffer, 0, sizeof keyBuffer);//Der Buffer wird geloescht
   jumptoDefault=60;
@@ -1629,7 +2063,7 @@ void MenuBetriebWinter(){
   lcd.print("8  BoilerBetrieb");
   lcd.setCursor(0,2);
   char line0[21];
-  sprintf(line0, "WinterBetr: %d", WinterBetrieb);
+  snprintf(line0, sizeof(line0), "WinterBetr: %d", WinterBetrieb);
   lcd.print(line0);
   memset(keyBuffer, 0, sizeof keyBuffer);//Der Buffer wird geloescht
   jumptoDefault=60;
@@ -1642,7 +2076,7 @@ void MenuBetriebBoiler(){
   lcd.print("9 NurHeizungBetr");
   lcd.setCursor(0,2);
   char line0[21];
-  sprintf(line0, "BoilerBetrieb: %d", BoilerBetrieb);
+  snprintf(line0, sizeof(line0), "BoilerBetrieb: %d", BoilerBetrieb);
   lcd.print(line0);
   memset(keyBuffer, 0, sizeof keyBuffer);//Der Buffer wird geloescht
   jumptoDefault=60;
@@ -1655,7 +2089,7 @@ void MenuBetriebNurHeizung(){
   lcd.print("10  Tagbetrieb");
   lcd.setCursor(0,2);
   char line0[21];
-  sprintf(line0, "NurHeizBetr: %d", NurHeizung);
+  snprintf(line0, sizeof(line0), "NurHeizBetr: %d", NurHeizung);
   lcd.print(line0);
   memset(keyBuffer, 0, sizeof keyBuffer);//Der Buffer wird geloescht
   jumptoDefault=60;
@@ -1667,10 +2101,10 @@ void MenuHeizbeginnTag(){
   lcd.setCursor(0,1);
   lcd.print("11  Nachtbetrieb");
   lcd.setCursor(0,2);
-  char float_str[8];
+  char float_str[32];
   char line0[21];
-  dtostrf(TagBegin,4,2,float_str);
-  sprintf(line0, "ZeitNow: %-5s", float_str);
+  snprintf(float_str, sizeof(float_str), "%4.2f", static_cast<double>(TagBegin));
+  snprintf(line0, sizeof(line0), "ZeitNow: %-5s", float_str);
   lcd.print(line0);
   memset(keyBuffer, 0, sizeof keyBuffer);//Der Buffer wird geloescht
   jumptoDefault=60;
@@ -1682,10 +2116,10 @@ void MenuHeizEndeNacht(){
   lcd.setCursor(0,1);
   lcd.print("12 Uptime/NTP_Sync");
   lcd.setCursor(0,2);
-  char float_str[8];
+  char float_str[32];
   char line0[21];
-  dtostrf(NachtBegin,4,2,float_str);
-  sprintf(line0, "ZeitNow: %-5s", float_str);
+  snprintf(float_str, sizeof(float_str), "%4.2f", static_cast<double>(NachtBegin));
+  snprintf(line0, sizeof(line0), "ZeitNow: %-5s", float_str);
   lcd.print(line0);
   memset(keyBuffer, 0, sizeof keyBuffer);//Der Buffer wird geloescht
   jumptoDefault=60;
@@ -1697,10 +2131,10 @@ void MenuDifBoilerTemp() {
   lcd.setCursor(0,1);
   lcd.print("15  VorlaufMaxTemp");
   lcd.setCursor(0,2);
-  char float_str[8];
+  char float_str[32];
   char line0[21];
-  dtostrf(tBoilerDiff,4,2,float_str);
-  sprintf(line0, "TempNow: %-9sC", float_str);
+  snprintf(float_str, sizeof(float_str), "%4.2f", static_cast<double>(tBoilerDiff));
+  snprintf(line0, sizeof(line0), "TempNow: %-9sC", float_str);
   lcd.print(line0);
   memset(keyBuffer, 0, sizeof keyBuffer);//Der Buffer wird geloescht
   jumptoDefault=60;
@@ -1713,10 +2147,10 @@ void Menu_tvmax() {
   lcd.setCursor(0,1);
   lcd.print("16  AussenMinTemp");
   lcd.setCursor(0,2);
-  char float_str[8];
+  char float_str[32];
   char line0[21];
-  dtostrf(tvmax,4,2,float_str);
-  sprintf(line0, "TempNow: %-9sC", float_str);
+  snprintf(float_str, sizeof(float_str), "%4.2f", static_cast<double>(tvmax));
+  snprintf(line0, sizeof(line0), "TempNow: %-9sC", float_str);
   lcd.print(line0);
   memset(keyBuffer, 0, sizeof keyBuffer);//Der Buffer wird geloescht
   jumptoDefault=60;
@@ -1728,10 +2162,10 @@ void Menu_taumin() {
   lcd.setCursor(0,1);
   lcd.print("17  Kurvenfaktor n");
   lcd.setCursor(0,2);
-  char float_str[8];
+  char float_str[32];
   char line0[21];
-  dtostrf(taumin,4,2,float_str);
-  sprintf(line0, "TempNow: %-9sC", float_str);
+  snprintf(float_str, sizeof(float_str), "%4.2f", static_cast<double>(taumin));
+  snprintf(line0, sizeof(line0), "TempNow: %-9sC", float_str);
   lcd.print(line0);
   memset(keyBuffer, 0, sizeof keyBuffer);//Der Buffer wird geloescht
   jumptoDefault=60;
@@ -1743,10 +2177,10 @@ void Menu_n() {
   lcd.setCursor(0,1);
   lcd.print("18 >AussentempRegel");
   lcd.setCursor(0,2);
-  char float_str[8];
+  char float_str[32];
   char line0[21];
-  dtostrf(n,4,2,float_str);
-  sprintf(line0, "FaktorNow: %-9s", float_str);
+  snprintf(float_str, sizeof(float_str), "%4.2f", static_cast<double>(n));
+  snprintf(line0, sizeof(line0), "FaktorNow: %-9s", float_str);
   lcd.print(line0);
   memset(keyBuffer, 0, sizeof keyBuffer);//Der Buffer wird geloescht
   jumptoDefault=60;
@@ -1758,10 +2192,10 @@ void MenuAussentempRegelung(){
   lcd.setCursor(0,1);
   lcd.print("                    ");
   lcd.setCursor(0,2);
-  char float_str[8];
+  char float_str[32];
   char line0[21];
-  dtostrf(n,4,2,float_str);
-  sprintf(line0, "Ja(1)/Nein(0): %d", AussentemperaturRegelung);
+  snprintf(float_str, sizeof(float_str), "%4.2f", static_cast<double>(n));
+  snprintf(line0, sizeof(line0), "Ja(1)/Nein(0): %d", AussentemperaturRegelung);
   lcd.print(line0);
   memset(keyBuffer, 0, sizeof keyBuffer);//Der Buffer wird geloescht
   jumptoDefault=60;
@@ -1780,7 +2214,7 @@ void Time2LCD(){
   if (MenuPage==12){
     lcd.clear();
     lcd.setCursor(0,0);
-    sprintf(line0, "UP: %ld, %02d:%02d%c%02d", uDay,uHour,uMinute,doppelp,uSecond);
+    snprintf(line0, sizeof(line0), "UP: %ld, %02d:%02d%c%02d", uDay,uHour,uMinute,doppelp,uSecond);
     lcd.print(line0);
     lcd.setCursor(0, 1);
     lcd.printf("H%ld A%c %s %d",BrennerLaufzeit,Betriebsart,mqtt_payload,mqtt_message );
@@ -1810,7 +2244,7 @@ void MenuSommerzeitEinAus(){
   lcd.print("14 DiffBoilerTemper ");
   lcd.setCursor(0,2);
   char line0[21];
-  sprintf(line0, "Sommerzeit: %d", Sommerzeit_EinAus);
+  snprintf(line0, sizeof(line0), "Sommerzeit: %d", Sommerzeit_EinAus);
   lcd.print(line0);
   memset(keyBuffer, 0, sizeof keyBuffer);//Der Buffer wird geloescht
   jumptoDefault=10;
@@ -1934,7 +2368,6 @@ void WiFiEvent(WiFiEvent_t event) {
         Serial.println("WiFi connected");
         Serial.println("IP address: ");
         Serial.println(WiFi.localIP());
-        delay(2000);
         connectToMqtt();
         break;
     case SYSTEM_EVENT_STA_DISCONNECTED:
@@ -2006,11 +2439,15 @@ void set2mqttupdate(){
   mqtt2update=true;
 }
 void mqttupdate() {
+  if (!asyncMqttClient.connected()) {
+    Serial.println("MQTT JSON: keine Verbindung");
+    return;
+  }
   String bez;
   char msg[50];
-  char line0[20];
+  char line0[48];
   char buffer[2048];
-  DynamicJsonDocument doc(2048);
+  JsonDocument doc;
   doc["S0Kessel"].set(tKessel);
   doc["S1Vorlauf"].set(tVorlauf);
   doc["S2Aussen"].set(tAussen);
@@ -2019,25 +2456,25 @@ void mqttupdate() {
   doc["T0Room"].set(tmyRoomdest);
   doc["T1Boiler"].set(tBoilerDest);
   doc["T2Vorlauf"].set(vorlaufTemperatur);
-  sprintf(line0, "%ld,%02d:%02d:%02d", uDay,uHour,uMinute,uSecond);
+  snprintf(line0, sizeof(line0), "%ld,%02d:%02d:%02d", uDay,uHour,uMinute,uSecond);
   doc["U0Uptime"].set(line0);
-  sprintf(line0, "%ld:%02d:%02d", brhours,brminutes,brsecunds);
+  snprintf(line0, sizeof(line0), "%ld:%02d:%02d", brhours,brminutes,brsecunds);
   doc["B0Brenner"].set(line0);
-  sprintf(line0, "%02d:%02d", TagBeginHr,TagBeginMi);
+  snprintf(line0, sizeof(line0), "%02d:%02d", TagBeginHr,TagBeginMi);
   doc["Day"].set(line0);
-  sprintf(line0, "%02d:%02d", NachtBeginHr,NachtBeginMi);
+  snprintf(line0, sizeof(line0), "%02d:%02d", NachtBeginHr,NachtBeginMi);
   doc["Night"].set(line0);
-  sprintf(line0, "%s", BrennerRelais ? "1" : "0");
+  snprintf(line0, sizeof(line0), "%s", BrennerRelais ? "1" : "0");
   doc["BrennerRelais"].set(line0);
-  sprintf(line0, "%s", HeizungsRelais ? "1" : "0");
+  snprintf(line0, sizeof(line0), "%s", HeizungsRelais ? "1" : "0");
   doc["HeizungsRelais"].set(line0);
-  sprintf(line0, "%s", BoilerRelais ? "1" : "0");
+  snprintf(line0, sizeof(line0), "%s", BoilerRelais ? "1" : "0");
   doc["BoilerRelais"].set(line0);
-  sprintf(line0, "%s", MischerAufRelais ? "1" : "0");
+  snprintf(line0, sizeof(line0), "%s", MischerAufRelais ? "1" : "0");
   doc["MischerAufRelais"].set(line0);
-  sprintf(line0, "%s", MischerZuRelais ? "1" : "0");
+  snprintf(line0, sizeof(line0), "%s", MischerZuRelais ? "1" : "0");
   doc["MischerZuRelais"].set(line0);
-  sprintf(line0, "%02d.%02d.%4d %02d:%02d", myday,mymonth,myyear,myhours,myminutes);
+  snprintf(line0, sizeof(line0), "%02d.%02d.%4d %02d:%02d", myday,mymonth,myyear,myhours,myminutes);
   doc["Uhrzeit"].set(line0);
   doc["WlanRetry"].set(wifi_retry);
   doc["WlanRSSI"].set(WiFi.RSSI());
@@ -2050,17 +2487,23 @@ void mqttupdate() {
     doc["answer"].set("---");
   }
     else{
-    sprintf(line0, mqtt_payload);
+    snprintf(line0, sizeof(line0), "%s", mqtt_payload);
     strcpy(mqtt_payload,"");
     doc["answer"].set(line0);
   }
-  sprintf(line0, "%c" ,Betriebsart);
+  snprintf(line0, sizeof(line0), "%c" ,Betriebsart);
   doc["betriebsart"].set(line0);
-  serializeJson(doc, buffer);
+  if (doc.overflowed() || measureJson(doc) >= sizeof(buffer)) {
+    Serial.println("MQTT: Statusnachricht zu gross");
+    return;
+  }
+  const size_t payloadSize = serializeJson(doc, buffer, sizeof(buffer));
 //  serializeJsonPretty(doc, buffer);
   bez = bez + MQTT_TEXT + "JDATA";
   bez.toCharArray(msg,50);
-  asyncMqttClient.publish(msg, 1, true, buffer);
+  const uint16_t jsonPacketId = asyncMqttClient.publish(msg, 1, true, buffer, payloadSize);
+  Serial.printf("MQTT JSON: %u Bytes, Versand %s\n", static_cast<unsigned>(payloadSize),
+                jsonPacketId ? "eingereiht" : "abgelehnt");
 }
 /*
 void mqttupdate() {
@@ -2069,132 +2512,132 @@ void mqttupdate() {
   char res[8];
   char line0[20];
     bez = bez + MQTT_TEXT + "S0" + "Kessel";
-    dtostrf(tKessel, 6, 2, res);
+    snprintf(res, sizeof(res), "%6.2f", static_cast<double>(tKessel));
     bez.toCharArray(msg,50);
     asyncMqttClient.publish(msg,1,true, res);
     bez="";
     bez = bez + MQTT_TEXT + "S1" + "Vorlauf";
-    dtostrf(tVorlauf, 6, 2, res);
+    snprintf(res, sizeof(res), "%6.2f", static_cast<double>(tVorlauf));
     bez.toCharArray(msg,50);
     asyncMqttClient.publish(msg,1, true, res);
     bez="";
     bez = bez + MQTT_TEXT + "S2" + "Aussen";
-    dtostrf(tAussen, 6, 2, res);
+    snprintf(res, sizeof(res), "%6.2f", static_cast<double>(tAussen));
     bez.toCharArray(msg,50);
     asyncMqttClient.publish(msg,1, true, res);
     bez="";
     bez = bez + MQTT_TEXT + "S3" + "Kueche";
-    dtostrf(tRoom, 6, 2, res);
+    snprintf(res, sizeof(res), "%6.2f", static_cast<double>(tRoom));
     bez.toCharArray(msg,50);
     asyncMqttClient.publish(msg,1, true, res);
     bez="";
     bez = bez + MQTT_TEXT + "S4" + "Boiler";
-    dtostrf(tBoiler, 6, 2, res);
+    snprintf(res, sizeof(res), "%6.2f", static_cast<double>(tBoiler));
     bez.toCharArray(msg,50);
     asyncMqttClient.publish(msg,1, true, res);
     bez="";
     bez = bez + MQTT_TEXT + "T0" + "Room";
-    dtostrf(tmyRoomdest, 6, 2, res);
+    snprintf(res, sizeof(res), "%6.2f", static_cast<double>(tmyRoomdest));
     bez.toCharArray(msg,50);
     asyncMqttClient.publish(msg,1, true, res);
     bez="";
     bez = bez + MQTT_TEXT + "U0" + "Uptime";
-    sprintf(line0, "%ld,%02d:%02d:%02d", uDay,uHour,uMinute,uSecond);
+    snprintf(line0, sizeof(line0), "%ld,%02d:%02d:%02d", uDay,uHour,uMinute,uSecond);
     bez.toCharArray(msg,50);
     asyncMqttClient.publish(msg,1, true, line0);
     bez="";
     bez = bez + MQTT_TEXT + "B0" + "Brenner";
-    sprintf(line0, "%ld:%02d:%02d", brhours,brminutes,brsecunds);
+    snprintf(line0, sizeof(line0), "%ld:%02d:%02d", brhours,brminutes,brsecunds);
     bez.toCharArray(msg,50);
     asyncMqttClient.publish(msg,1, true, line0);
     bez="";
     bez = bez + MQTT_TEXT + "Day";
-    sprintf(line0, "%02d:%02d", TagBeginHr,TagBeginMi);
+    snprintf(line0, sizeof(line0), "%02d:%02d", TagBeginHr,TagBeginMi);
     bez.toCharArray(msg,50);
     asyncMqttClient.publish(msg,1, true, line0);
     bez="";
     bez = bez + MQTT_TEXT + "Night";
-    sprintf(line0, "%02d:%02d", NachtBeginHr,NachtBeginMi);
+    snprintf(line0, sizeof(line0), "%02d:%02d", NachtBeginHr,NachtBeginMi);
     bez.toCharArray(msg,50);
     asyncMqttClient.publish(msg,1, true, line0);
     bez="";
     bez = bez + MQTT_TEXT + "BrennerRelais";
-    sprintf(line0, "%s", BrennerRelais ? "1" : "0");
+    snprintf(line0, sizeof(line0), "%s", BrennerRelais ? "1" : "0");
     bez.toCharArray(msg,50);
     asyncMqttClient.publish(msg,1, true, line0);
     bez="";
     bez = bez + MQTT_TEXT + "HeizungsRelais";
-    sprintf(line0, "%s", HeizungsRelais ? "1" : "0");
+    snprintf(line0, sizeof(line0), "%s", HeizungsRelais ? "1" : "0");
     bez.toCharArray(msg,50);
     asyncMqttClient.publish(msg,1, true, line0);
     bez="";
     bez = bez + MQTT_TEXT + "BoilerRelais";
-    sprintf(line0, "%s", BoilerRelais ? "1" : "0");
+    snprintf(line0, sizeof(line0), "%s", BoilerRelais ? "1" : "0");
     bez.toCharArray(msg,50);
     asyncMqttClient.publish(msg,1, true, line0);
     bez="";
     bez = bez + MQTT_TEXT + "Uhrzeit";
-    sprintf(line0, "%02d.%02d.%4d %02d:%02d", myday,mymonth,myyear,myhours,myminutes);
+    snprintf(line0, sizeof(line0), "%02d.%02d.%4d %02d:%02d", myday,mymonth,myyear,myhours,myminutes);
     bez.toCharArray(msg,50);
     asyncMqttClient.publish(msg,1, true, line0);
     bez="";
     bez = bez + MQTT_TEXT + "WlanRetryConnect";
-    sprintf(line0, "%d", wifi_retry);
+    snprintf(line0, sizeof(line0), "%d", wifi_retry);
     bez.toCharArray(msg,50);
     asyncMqttClient.publish(msg,1, true, line0);
     bez="";
     bez = bez + MQTT_TEXT + "WlanRSSI";
-    sprintf(line0, "%d", WiFi.RSSI());
+    snprintf(line0, sizeof(line0), "%d", WiFi.RSSI());
     bez.toCharArray(msg,50);
     asyncMqttClient.publish(msg,1, true, line0);
     bez="";
     bez = bez + MQTT_TEXT + "vorlaufTemperatur";
-    sprintf(line0, "%.2f", vorlaufTemperatur);
+    snprintf(line0, sizeof(line0), "%.2f", vorlaufTemperatur);
     bez.toCharArray(msg,50);
     asyncMqttClient.publish(msg,1, true, line0);
     bez="";
     bez = bez + MQTT_TEXT + "atRegelung";
-    sprintf(line0, "%d", AussentemperaturRegelung);
+    snprintf(line0, sizeof(line0), "%d", AussentemperaturRegelung);
     bez.toCharArray(msg,50);
     asyncMqttClient.publish(msg,1, true, line0);
 //    bez="";
 //    bez = bez + MQTT_TEXT + "WlanAvgTimeMs";
-//    sprintf(line0, "%d", avg_time_ms);
+//    snprintf(line0, sizeof(line0), "%d", avg_time_ms);
 //    bez.toCharArray(msg,50);
 //    asyncMqttClient.publish(msg,1, true, line0);
     bez="";
     bez = bez + MQTT_TEXT + "PumpenNachlauf";
-    sprintf(line0, "%d", PumpenNachlauf);
+    snprintf(line0, sizeof(line0), "%d", PumpenNachlauf);
     bez.toCharArray(msg,50);
     asyncMqttClient.publish(msg,1, true, line0);
 //    bez="";
 //    bez = bez + MQTT_TEXT + "MischerAuf";
-//    sprintf(line0, "%d", MischerAufRelais);
+//    snprintf(line0, sizeof(line0), "%d", MischerAufRelais);
 //    bez.toCharArray(msg,50);
 //    asyncMqttClient.publish(msg,1, true, line0);
 //    bez="";
 //    bez = bez + MQTT_TEXT + "MischerZu";
-//    sprintf(line0, "%d", MischerZuRelais);
+//    snprintf(line0, sizeof(line0), "%d", MischerZuRelais);
 //    bez.toCharArray(msg,50);
 //    asyncMqttClient.publish(msg,1, true, line0);
     bez="";
     bez = bez + MQTT_TEXT + "tvmax";
-    sprintf(line0, "%.2f", tvmax);
+    snprintf(line0, sizeof(line0), "%.2f", tvmax);
     bez.toCharArray(msg,50);
     asyncMqttClient.publish(msg,1, true, line0);
     bez="";
     bez = bez + MQTT_TEXT + "taumin";
-    sprintf(line0, "%.2f", taumin);
+    snprintf(line0, sizeof(line0), "%.2f", taumin);
     bez.toCharArray(msg,50);
     asyncMqttClient.publish(msg,1, true, line0);
     bez="";
     bez = bez + MQTT_TEXT + "n";
-    sprintf(line0, "%.2f", n);
+    snprintf(line0, sizeof(line0), "%.2f", n);
     bez.toCharArray(msg,50);
     asyncMqttClient.publish(msg,1, true, line0);
 //    bez="";
 //    bez = bez + MQTT_TEXT + "dataToI2Cextender";
-//    sprintf(line0, "%d", dataToI2C);
+//    snprintf(line0, sizeof(line0), "%d", dataToI2C);
 //    bez.toCharArray(msg,50);
 //    asyncMqttClient.publish(msg,1, true, line0);
     if(strcmp(mqtt_payload,"")==0){
@@ -2202,14 +2645,14 @@ void mqttupdate() {
     else{
       bez="";
       bez = bez + MQTT_TEXT + "answer"; //Antwort nach Subscribe Message
-      sprintf(line0, mqtt_payload);
+      snprintf(line0, sizeof(line0), "%s", mqtt_payload);
       strcpy(mqtt_payload,"");
       bez.toCharArray(msg,50);
       asyncMqttClient.publish(msg,1, true, line0);
     }
     bez="";
     bez = bez + MQTT_TEXT + "Betriebsart";
-    sprintf(line0, "%c" ,Betriebsart);
+    snprintf(line0, sizeof(line0), "%c" ,Betriebsart);
     bez.toCharArray(msg,50);
     asyncMqttClient.publish(msg,1, true, line0);
     esp_task_wdt_reset(); //watchdog Zeit rücksetzen
@@ -2242,14 +2685,20 @@ void connect() {
 /* *******************************************************************************************************
                                          ds18b20
 ******************************************************************************************************* */
-void OneWireReset(int Pin) // reset.  Should improve to act as a presence pulse
-{
+bool OneWireReset(int Pin) {
+   // Preserve the long-line reset duration, sampling presence in the same
+   // transaction rather than resetting once with the library and again here.
    digitalWrite(Pin, LOW);
-   pinMode(Pin, OUTPUT); // bring low for 500 us
-   delayMicroseconds(550);//500 original
+   pinMode(Pin, OUTPUT);
+   delayMicroseconds(550);
+   noInterrupts();
    pinMode(Pin, INPUT);
-   delayMicroseconds(500);
-}//end  OneWireReset()
+   delayMicroseconds(70);
+   const bool present = digitalRead(Pin) == LOW;
+   interrupts();
+   delayMicroseconds(430);
+   return present;
+}
 
 void OneWireOutByte(int Pin, byte d) // output byte d (least sig bit first).
 {
@@ -2311,76 +2760,58 @@ byte OneWireInByte(int Pin) // read byte, least sig byte first
 }//end OneWireInByte()
 
 void readTturePt1(byte Pin){
-   /*This part starts the sensor doing a conversion,
-       i.e. taking a reading, and storing result inside
-       itself.
-     This must be given time to complete. The time necessary
-       is affected by how sensor is powered, and exact
-       sensor time. 1.8 seconds (yes, nearly 1/30th of a minute!)
-       should, off the top of my head, be enough, worst case.
-     Other things can be happening while this is being
-       "given time"... just don't disturb the chip.
-
-     Pass WHICH pin you want to read in "Pin"
-     Returns values in... (See global declarations)*/
-   OneWireReset(Pin);
-   OneWireOutByte(Pin, 0xcc);
-   OneWireOutByte(Pin, 0x44); // request temperature conversion,
-        //  maintain strong pullup while that is done.
-}//end readTturePt1
+   if (!sensorDS1820[BOILER_NUMBER].reset()) {
+     boilerDiagnostic = BOILER_NO_RESPONSE;
+     markSensorFailure(BOILER_NUMBER);
+     return;
+   }
+   sensorDS1820[BOILER_NUMBER].write(0xCC, POWER_MODE);
+   sensorDS1820[BOILER_NUMBER].write(0x44, POWER_MODE);
+}
 
 
 void readTturePt2(byte Pin, const byte tmp_bWhichSensor){
-   /*This part starts asks the sensor for the reading
-       it took "a moment ago", arising from the call
-       of readTturePt1
-     (This should have a "check that CheckSum isn't
-       reporting a problem" added to it... or else
-       a readTturePt3 should be added to do that.
-       Not "necessary", but A Very Good Idea!)
-     Pass the pin connected to the sensor you want
-       to read in "Pin"
-     Returns values in... (See global declarations)*/
-   int HighByte,LowByte;
-   OneWireReset(Pin);
-   OneWireOutByte(Pin, 0xcc);
-   OneWireOutByte(Pin, 0xbe);
-   LowByte = OneWireInByte(Pin);
-   HighByte = OneWireInByte(Pin);
-   //At this point, we SHOULD have the two bytes returned by the sensor safely
-   //  captured in LowByte and HighByte.
-   //Now we turn to combining them into a temperature reading in
-   //  more usual units.
-   //My work got confused... does this return the tture in
-   //  TReading in TENTHS of degree C or HUNDRETHS of degree C?
-   //The code down to "end of dubious section"... is quite suspect.
-   //Remember, if you have to work on it, that some DS18xx chips encode
-   //  the temperatures slightly differently than others. Sigh.
-   //I'm not SURE which chip this encoding is right for...
-   //I think it is the DS18B20 (and others using the same
-   //data format.)
-   TReading[tmp_bWhichSensor] = (HighByte << 8) + LowByte;
-   SignBit[tmp_bWhichSensor] = TReading[tmp_bWhichSensor] & 0x8000;  // test most sig bit
-
-   if (SignBit[tmp_bWhichSensor]) // negative
-
-   {
-      TReading[tmp_bWhichSensor] = (TReading[tmp_bWhichSensor] ^ 0xffff) + 1; // 2's comp
+   if (tmp_bWhichSensor != BOILER_NUMBER) return;
+   OneWire& wire = sensorDS1820[tmp_bWhichSensor];
+   if (!wire.reset()) {
+     boilerDiagnostic = BOILER_NO_RESPONSE;
+     markSensorFailure(tmp_bWhichSensor);
+     return;
    }
-
-   //At this point, we SHOULD have the two bytes returned by the sensor safely
-   fTc_100[tmp_bWhichSensor] = (6.0 * TReading[tmp_bWhichSensor]) + TReading[tmp_bWhichSensor] / 4.0;
-   //multiply by (100 * 0.0625) or 6.25
-   Whole[tmp_bWhichSensor] = fTc_100[tmp_bWhichSensor] / 100.0;  // separate off the whole
-   //number and fractional portions
-   //Now remove the negative sign from negative values in Whole...
-   if  (Whole[tmp_bWhichSensor] < 0) {Whole[tmp_bWhichSensor]*= -1;};
-   Fract[tmp_bWhichSensor] = round((fTc_100[tmp_bWhichSensor]-Whole[tmp_bWhichSensor])* 100);
-   bWhichSensor=tmp_bWhichSensor;//durch irgendwas ändert sich der bWhichSensor - Wert. Deshalb setze ich ihn hier wieder richtig.
+   wire.write(0xCC, POWER_MODE);
+   wire.write(0xBE, POWER_MODE);
+   byte scratchpad[9];
+   for (byte i = 0; i < 9; ++i) scratchpad[i] = wire.read();
+   portENTER_CRITICAL(&boilerDiagnosticMux);
+   memcpy(boilerRawBytes, scratchpad, sizeof(scratchpad));
+   boilerRawAvailable = true;
+   portEXIT_CRITICAL(&boilerDiagnosticMux);
+   if (!validSensorScratchpad(scratchpad)) {
+     bool allZero = true, allHigh = true;
+     for (byte i = 0; i < 9; ++i) {
+       allZero &= scratchpad[i] == 0;
+       allHigh &= scratchpad[i] == 0xff;
+     }
+     boilerDiagnostic = allZero ? BOILER_ZERO_DATA : (allHigh ? BOILER_HIGH_DATA : BOILER_BAD_CRC);
+     markSensorFailure(tmp_bWhichSensor);
+     return;
+   }
+   int16_t raw = static_cast<int16_t>((scratchpad[1] << 8) | scratchpad[0]);
+   const byte resolution = scratchpad[4] & 0x60;
+   if (resolution == 0x00) raw &= ~7;
+   else if (resolution == 0x20) raw &= ~3;
+   else if (resolution == 0x40) raw &= ~1;
+   const float measured = raw / 16.0f;
+   if (!markSensorSuccess(tmp_bWhichSensor, measured)) return;
+   if (tBoiler != measured + OS4) {
+     tBoiler = measured + OS4;
+     temp_update = true;
+   }
 }//end readTturePt2
 
 
 void printTture(){//Uses values from global variables.
+   if (bWhichSensor > kTtureSensorMaxIndex) return;
    String temp;
    if (Whole[bWhichSensor] < 10)
    /* To line up decimal points. This assumes that no tture will be < -99.9 or > +99.0 As these are in degrees C, that seems reasonable.
@@ -2399,8 +2830,8 @@ void printTture(){//Uses values from global variables.
       temp = temp + "0";
    }
    temp = temp + Fract[bWhichSensor];
-   char buf[temp.length()];
-   temp.toCharArray(buf,temp.length());
+   char buf[32];
+   snprintf(buf, sizeof(buf), "%s", temp.c_str());
 
      switch (bWhichSensor) {
         case 0:
@@ -2552,7 +2983,39 @@ void kein_Betrieb() {
 /* *******************************************************************************************************
                                          RoomAnforerung
 ******************************************************************************************************* */
+bool updateHeatingCurve() {
+  heizkurveGueltig = false;
+  vorlaufTemperatur = 0.0f;
+  if (AussentemperaturRegelung == 0) return false;
+
+  // Snapshot the parameters and reject undefined mathematical domains.
+  const double room = tmyRoomdest;
+  const double outside = tAussen;
+  const double maximum = tvmax;
+  const double minimumOutside = taumin;
+  const double exponent = n;
+  if (!isfinite(room) || !isfinite(outside) || !isfinite(maximum) ||
+      !isfinite(minimumOutside) || !isfinite(exponent) ||
+      room < 5.0 || room > 40.0 || outside < -55.0 || outside > 125.0 ||
+      maximum < room || maximum > 100.0 || minimumOutside < -50.0 ||
+      minimumOutside > 0.0 || exponent < 0.1 || exponent > 10.0) return false;
+
+  const double denominator = room - minimumOutside;
+  if (denominator <= 0.0) return false;
+  double ratio = (room - outside) / denominator;
+  // Above the room target use the lower endpoint; below the design outside
+  // temperature use the configured maximum, never a negative power base.
+  if (ratio < 0.0) ratio = 0.0;
+  if (ratio > 1.0) ratio = 1.0;
+  const double target = room + (maximum - room) * pow(ratio, 1.0 / exponent);
+  if (!isfinite(target) || target < room || target > maximum) return false;
+  vorlaufTemperatur = static_cast<float>(floor(target * 100.0) / 100.0);
+  heizkurveGueltig = true;
+  return true;
+}
+
 void RoomAnforderungf(){
+  if (heatingPumpSensorFault()) { RoomAnforderung = false; return; }
   if(AussentemperaturRegelung==0){
     if (tRoom < tmyRoomdest){
       RoomAnforderung=true;
@@ -2560,7 +3023,7 @@ void RoomAnforderungf(){
       RoomAnforderung=false;
     }
   }else{
-    if (tVorlauf < vorlaufTemperatur){
+    if (updateHeatingCurve() && tVorlauf < vorlaufTemperatur){
       RoomAnforderung=true;
     }else{
       RoomAnforderung=false;
@@ -2604,6 +3067,7 @@ void updateKachelofenStatus(){
                                          BoilerAnforderung
 ******************************************************************************************************* */
 void BoilerAnforderungf(){
+  if (boilerPumpSensorFault()) { BoilerAnforderung = false; return; }
   if(tBoiler < tBoilerDest){
     BoilerAnforderung=1;
   }else{
@@ -2615,15 +3079,68 @@ void BoilerAnforderungf(){
 /* *******************************************************************************************************
                                          Ausgänge schalten
 ******************************************************************************************************* */
+bool heatingPumpSensorFault() {
+  return !sensorIsUsable(0) || !sensorIsUsable(1) ||
+         !sensorIsUsable(AussentemperaturRegelung == 0 ? 3 : 2);
+}
+
+bool boilerPumpSensorFault() {
+  return !sensorIsUsable(0) || !sensorIsUsable(4);
+}
+
+struct PumpFaultState {
+  bool active = false;
+  bool wasRunning = false;
+  bool expiryReported = false;
+  unsigned long started = 0;
+};
+PumpFaultState heatingPumpFault, boilerPumpFault;
+constexpr unsigned long PUMP_FAULT_RUNON_MS = 10UL * 60UL * 1000UL;
+
+bool pumpOutputWithFault(PumpFaultState& state, bool fault, bool requested,
+                         uint8_t pin, const char* name) {
+  if (!fault) {
+    if (state.active) Serial.printf("%s: Sensoren wieder gueltig\n", name);
+    state.active = false;
+    return requested;
+  }
+  if (!state.active) {
+    state.active = true;
+    state.wasRunning = digitalRead(pin) == HIGH;
+    state.started = millis();
+    state.expiryReported = false;
+    Serial.printf("%s: Sensorfehler, %s\n", name,
+                  state.wasRunning ? "10 Minuten Nachlauf" : "bleibt aus");
+  }
+  const bool running = state.wasRunning &&
+    (unsigned long)(millis() - state.started) < PUMP_FAULT_RUNON_MS;
+  if (state.wasRunning && !running && !state.expiryReported) {
+    Serial.printf("%s: Nachlauf beendet, gesperrt\n", name);
+    state.expiryReported = true;
+  }
+  return running;
+}
+
 void SetOutPin(){
-  if (HeizungsRelais==true || Pumpenloesen){
+  enforceKesselSensorLock();
+  const bool heatingFault = heatingPumpSensorFault();
+  const bool boilerFault = boilerPumpSensorFault();
+  const bool heatingOn = pumpOutputWithFault(heatingPumpFault, heatingFault,
+      HeizungsRelais || Pumpenloesen, HeizungPin, "Heizungspumpe");
+  const bool boilerOn = pumpOutputWithFault(boilerPumpFault, boilerFault,
+      BoilerRelais || Pumpenloesen, BoilerPin, "Boilerpumpe");
+  if (heatingFault) RoomAnforderung = false;
+  if (boilerFault) { BoilerAnforderung = false; BoilerAufheizen = false; }
+  HeizungsRelais = heatingOn;
+  BoilerRelais = boilerOn;
+  if (heatingOn){
     digitalWrite(HeizungPin, HIGH);
    // bitSet(ioextender0_indicate, exHeizung_Pin);
   }else{
     digitalWrite(HeizungPin, LOW);
    // bitClear(ioextender0_indicate, exHeizung_Pin);
   }
-  if (BoilerRelais==true || Pumpenloesen){
+  if (boilerOn){
     digitalWrite(BoilerPin, HIGH);
    // bitSet(ioextender0_indicate, exBoiler_Pin);
   }else{
@@ -2678,14 +3195,20 @@ int chckKessel() {
                                          Room Check
 ******************************************************************************************************* */
 void chckRoom() {
+  if (heatingPumpSensorFault()) {
+    RoomAnforderung = false;
+    if (!mischer_init_laeuft) MischerStop();
+    SetOutPin();
+    return;
+  }
 
-// Begin Berechnung für AT-Regelung
-  float ti = tmyRoomdest;
-  float tau = tAussen;
-
-  vorlaufTemperatur = ti + (tvmax -ti)*pow(((ti-tau)/(ti-taumin)),(1/n));
-  vorlaufTemperatur = ((int)(vorlaufTemperatur*100)) / 100.0;
-// Ende Berechnung für AT-Regelung
+  updateHeatingCurve();
+  if (AussentemperaturRegelung != 0 && !heizkurveGueltig) {
+    RoomAnforderung = false;
+    if (!mischer_init_laeuft) MischerStop();
+    SetOutPin();
+    return;
+  }
 
   if(RoomHeizen==false){
     HeizungsRelais=false;
@@ -2731,6 +3254,12 @@ void chckRoom() {
                                          Boiler Check
 ******************************************************************************************************* */
 void chckBoiler() {
+  if (boilerPumpSensorFault()) {
+    BoilerAnforderung = false;
+    BoilerAufheizen = false;
+    SetOutPin();
+    return;
+  }
   if(BoilerHeizen==false){
     BoilerRelais=false;
     BoilerAufheizen=false;
@@ -2830,11 +3359,33 @@ void onMqttSubscribe(uint16_t packetId, uint8_t qos) {
   Serial.println(qos);
 }
 
-void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total){
+void applyMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total, unsigned long receivedAt){
+  if (!topic || !payload || index != 0 || len != total || len == 0 || len >= 64 ||
+      memchr(payload, '\0', len) != nullptr) {
+    Serial.println("MQTT: ungueltige oder aufgeteilte Nachricht verworfen");
+    return;
+  }
 /*    /SmartHome/Keller/Heizung/setRaumTemp
 in FHEM:   set MQTT_SERVER publish /SmartHome/Keller/Heizung/setRaumTemp up
            set MQTT_SERVER publish /SmartHome/Keller/Heizung/setRaumTemp down
 */
+  if (strcmp(topic, GAS_MQTT_TOPIC) == 0) {
+    char text[64];
+    memcpy(text, payload, len);
+    text[len] = '\0';
+    char* end = nullptr;
+    const double value = strtod(text, &end);
+    if (end == text || *end != '\0' || !isfinite(value) || value < 0 || value > 1e12) {
+      Serial.println("Gaszaehler: ungueltigen Stand verworfen");
+      return;
+    }
+    portENTER_CRITICAL(&gasMux);
+    pendingGasTotal = value;
+    pendingGasRetained = properties.retain;
+    pendingGas = true;
+    portEXIT_CRITICAL(&gasMux);
+    return;
+  }
   // Kachelofen-Temperatur: eigenes Topic, Payload ist nur die Temperatur (z.B. 65.4).
   if(strcmp(topic, KACHELOFEN_MQTT_TOPIC) == 0){
     if(index == 0 && len == total && len > 0 && len < 16){
@@ -2845,7 +3396,7 @@ in FHEM:   set MQTT_SERVER publish /SmartHome/Keller/Heizung/setRaumTemp up
       float newTemp = strtof(tempPayload, &endPtr);
       if(endPtr != tempPayload && *endPtr == '\0' && isfinite(newTemp) && newTemp >= -40.0 && newTemp <= 200.0){
         tKachelofen = newTemp;
-        kachelofenLastUpdate = millis();
+        kachelofenLastUpdate = receivedAt;
         updateKachelofenStatus();
         Serial.print("Kachelofen MQTT: ");
         Serial.print(tKachelofen, 1);
@@ -2859,9 +3410,11 @@ in FHEM:   set MQTT_SERVER publish /SmartHome/Keller/Heizung/setRaumTemp up
   }
 
   mqtt_message++;
-  char new_payload[len+1];
+  const String controlTopic = String(MQTT_TEXT) + "set";
+  if (strcmp(topic, controlTopic.c_str()) != 0) return;
+  char new_payload[64];
+  memcpy(new_payload, payload, len);
   new_payload[len] = '\0';
-  strncpy(new_payload, payload, len);
 
     Serial.print("\nReceived message [");
     Serial.print(topic);
@@ -2985,8 +3538,14 @@ in FHEM:   set MQTT_SERVER publish /SmartHome/Keller/Heizung/setRaumTemp up
         return;
     }
     if(strstr(new_payload,"kachelofenEin:") == new_payload){
-        char* teilstr = strchr(new_payload, ':');
-        float tempTemp = atof(teilstr+1);
+        const char* numeric = new_payload + 14;
+        char* endPtr = nullptr;
+        const float tempTemp = strtof(numeric, &endPtr);
+        if (endPtr == numeric || *endPtr != '\0' || !isfinite(tempTemp) ||
+            tempTemp < 10.0f || tempTemp > 150.0f) {
+          Serial.println("MQTT: ungueltiger Zahlenwert verworfen");
+          return;
+        }
         if(isfinite(tempTemp) && tempTemp >= 10.0 && tempTemp <= 150.0 && tempTemp > kachelofenAusTemp){
           kachelofenEinTemp = tempTemp;
           EEPROM.put( EEADDRESS_KACHELOFEN_EIN, kachelofenEinTemp );
@@ -3001,8 +3560,14 @@ in FHEM:   set MQTT_SERVER publish /SmartHome/Keller/Heizung/setRaumTemp up
         return;
     }
     if(strstr(new_payload,"kachelofenAus:") == new_payload){
-        char* teilstr = strchr(new_payload, ':');
-        float tempTemp = atof(teilstr+1);
+        const char* numeric = new_payload + 14;
+        char* endPtr = nullptr;
+        const float tempTemp = strtof(numeric, &endPtr);
+        if (endPtr == numeric || *endPtr != '\0' || !isfinite(tempTemp) ||
+            tempTemp < 0.0f || tempTemp > 140.0f) {
+          Serial.println("MQTT: ungueltiger Zahlenwert verworfen");
+          return;
+        }
         if(isfinite(tempTemp) && tempTemp >= 0.0 && tempTemp <= 140.0 && tempTemp < kachelofenEinTemp){
           kachelofenAusTemp = tempTemp;
           EEPROM.put( EEADDRESS_KACHELOFEN_AUS, kachelofenAusTemp );
@@ -3016,45 +3581,109 @@ in FHEM:   set MQTT_SERVER publish /SmartHome/Keller/Heizung/setRaumTemp up
         }
         return;
     }
-    if(strstr(new_payload,"newRoomTemp")){ //Raumtemperatur per mqtt setzen
-        char* teilstr = strchr((char *)new_payload, ':');
-        float tempTemp = atof(teilstr+1);
+    if(strncmp(new_payload,"newRoomTemp:", 12) == 0){ //Raumtemperatur per mqtt setzen
+        const char* numeric = new_payload + 12;
+        char* endPtr = nullptr;
+        const float tempTemp = strtof(numeric, &endPtr);
+        if (endPtr == numeric || *endPtr != '\0' || !isfinite(tempTemp) ||
+            tempTemp < 5.0f || tempTemp > 40.0f) {
+          Serial.println("MQTT: ungueltiger Zahlenwert verworfen");
+          return;
+        }
         tRoomTag = tempTemp;
         tRoomNacht = tempTemp;
         strcpy(mqtt_payload,"h_newRT");
         return;
     }
-    if(strstr(new_payload,"newBoilerTemp")){ //Raumtemperatur per mqtt setzen
-        char* teilstr = strchr((char *)new_payload, ':');
-        float tempTemp = atof(teilstr+1);
+    if(strncmp(new_payload,"newBoilerTemp:", 14) == 0){ //Raumtemperatur per mqtt setzen
+        const char* numeric = new_payload + 14;
+        char* endPtr = nullptr;
+        const float tempTemp = strtof(numeric, &endPtr);
+        if (endPtr == numeric || *endPtr != '\0' || !isfinite(tempTemp) ||
+            tempTemp < 0.0f || tempTemp > 100.0f) {
+          Serial.println("MQTT: ungueltiger Zahlenwert verworfen");
+          return;
+        }
         tBoilerDest = tempTemp;
         EEPROM.put( EEADDRESS_BOILER, tBoilerDest );
         strcpy(mqtt_payload,"h_newBT");
         return;
     }
-    if(strstr(new_payload,"tvmax")){ //max. Vorlauftemperatur  per mqtt setzen
-        char* teilstr = strchr((char *)new_payload, ':');
-        float tempTemp = atof(teilstr+1);
+    if(strncmp(new_payload,"tvmax:", 6) == 0){ //max. Vorlauftemperatur  per mqtt setzen
+        const char* numeric = new_payload + 6;
+        char* endPtr = nullptr;
+        const float tempTemp = strtof(numeric, &endPtr);
+        if (endPtr == numeric || *endPtr != '\0' || !isfinite(tempTemp) ||
+            tempTemp < 0.0f || tempTemp > 100.0f) {
+          Serial.println("MQTT: ungueltiger Zahlenwert verworfen");
+          return;
+        }
         tvmax = tempTemp;
         strcpy(mqtt_payload,"h_tvmax");
         return;
     }
-    if(strstr(new_payload,"taumin")){ //minimal Aussentemp per mqtt setzen
-        char* teilstr = strchr((char *)new_payload, ':');
-        float tempTemp = atof(teilstr+1);
+    if(strncmp(new_payload,"taumin:", 7) == 0){ //minimal Aussentemp per mqtt setzen
+        const char* numeric = new_payload + 7;
+        char* endPtr = nullptr;
+        const float tempTemp = strtof(numeric, &endPtr);
+        if (endPtr == numeric || *endPtr != '\0' || !isfinite(tempTemp) ||
+            tempTemp < -50.0f || tempTemp > 0.0f) {
+          Serial.println("MQTT: ungueltiger Zahlenwert verworfen");
+          return;
+        }
         taumin = tempTemp;
         strcpy(mqtt_payload,"h_tvmin");
         return;
     }
-    if(strstr(new_payload,"tn")){ //Steigung per mqtt setzen
-        char* teilstr = strchr((char *)new_payload, ':');
-        float tempTemp = atof(teilstr+1);
+    if(strncmp(new_payload,"tn:", 3) == 0){ //Steigung per mqtt setzen
+        const char* numeric = new_payload + 3;
+        char* endPtr = nullptr;
+        const float tempTemp = strtof(numeric, &endPtr);
+        if (endPtr == numeric || *endPtr != '\0' || !isfinite(tempTemp) ||
+            tempTemp < 0.1f || tempTemp > 10.0f) {
+          Serial.println("MQTT: ungueltiger Zahlenwert verworfen");
+          return;
+        }
         n = tempTemp;
         strcpy(mqtt_payload,"h_tn");
         return;
     }
 }
 
+
+void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties properties,
+                   size_t len, size_t index, size_t total) {
+  if (!topic || !payload || index != 0 || len != total || len == 0 || len >= 64 ||
+      memchr(payload, '\0', len) != nullptr) {
+    Serial.println("MQTT: ungueltige oder aufgeteilte Nachricht verworfen");
+    return;
+  }
+  if (strcmp(topic, MQTT_TEXT "set") != 0 &&
+      strcmp(topic, KACHELOFEN_MQTT_TOPIC) != 0 && strcmp(topic, GAS_MQTT_TOPIC) != 0) return;
+  const size_t topicLength = strnlen(topic, 128);
+  if (topicLength >= 128) return;
+  PendingMqttMessage message{};
+  memcpy(message.topic, topic, topicLength + 1);
+  memcpy(message.payload, payload, len);
+  message.payload[len] = '\0';
+  message.length = len;
+  message.properties = properties;
+  message.receivedAt = millis();
+  if (!mqttMessageQueue || xQueueSend(mqttMessageQueue, &message, 0) != pdTRUE) {
+    Serial.println("MQTT: Empfangswarteschlange voll oder nicht verfuegbar, Nachricht verworfen");
+  }
+}
+
+void processMqttMessages() {
+  if (!mqttMessageQueue) return;
+  PendingMqttMessage message;
+  // Bound each pass, so a stream of commands cannot starve the controller loop.
+  for (unsigned i = 0; i < MQTT_QUEUE_LENGTH; ++i) {
+    if (xQueueReceive(mqttMessageQueue, &message, 0) != pdTRUE) break;
+    applyMqttMessage(message.topic, message.payload, message.properties,
+                     message.length, 0, message.length, message.receivedAt);
+  }
+}
 
 /* *******************************************************************************************************
                                          mqtt clearstring
@@ -3071,13 +3700,13 @@ in FHEM:   set MQTT_SERVER publish /SmartHome/Keller/Heizung/setRaumTemp up
                                          mqtt reconnect
 ******************************************************************************************************* */
 void onMqttConnect(bool sessionPresent) {
-      char subsc[50]=MQTT_TEXT;
+      const String subsc = String(MQTT_TEXT) + "set";
       Serial.println("connect to MQTT\n");
       Serial.print("Session present: ");
       Serial.println(sessionPresent);
-      strcat(subsc,"set");//nun /SmartHome/Keller/Heizung/setRaumTemp
-      asyncMqttClient.subscribe(subsc,1);
+      asyncMqttClient.subscribe(subsc.c_str(),1);
       asyncMqttClient.subscribe(KACHELOFEN_MQTT_TOPIC,1);
+      asyncMqttClient.subscribe(GAS_MQTT_TOPIC,1);
       //uint16_t packetIdSub = asyncMqttClient.subscribe("/SmartHome/Keller/Heizung/setRaumTemp", 2);
 }
 
@@ -3097,37 +3726,37 @@ void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
 void print_Main_LCD_Values(){
   char line0[21];
   char line1[21];
-  char float_str0[8];
-  char float_str1[8];
+  char float_str0[32];
+  char float_str1[32];
 
   lcd.setCursor(0, 0);
   lcd.print("                    ");
-  sprintf(line1, "Br%sH%sB%sA%sZ%s", BrennerRelais ? "+" : "-", HeizungsRelais ? "+" : "-", BoilerRelais ? "+" : "-", MischerAufRelais ? "+" : "-", MischerZuRelais ? "+" : "-");
+  snprintf(line1, sizeof(line1), "Br%sH%sB%sA%sZ%s", BrennerRelais ? "+" : "-", HeizungsRelais ? "+" : "-", BoilerRelais ? "+" : "-", MischerAufRelais ? "+" : "-", MischerZuRelais ? "+" : "-");
   lcd.setCursor(0, 0);
   lcd.print(line1);
    serial_go_home();
    Serial.println(line1);
   lcd.setCursor(12, 0);
-  dtostrf(tmyRoomdest,4,1,float_str0);
-  sprintf(line0, "%cR=%s",daynight,float_str0);
+  snprintf(float_str0, sizeof(float_str0), "%4.1f", static_cast<double>(tmyRoomdest));
+  snprintf(line0, sizeof(line0), "%cR=%s",daynight,float_str0);
   lcd.print(line0);
    serial_newline(); 
    Serial.println(line0);
   lcd.setCursor(0, 1);
   lcd.print("                    ");
   lcd.setCursor(0, 1);
-  dtostrf(tKessel,4,1,float_str0);
-  dtostrf(tVorlauf,4,1,float_str1);
-  sprintf(line0, "H:%-5s V:%-5s", float_str0, float_str1); // %6s right pads the string
+  snprintf(float_str0, sizeof(float_str0), "%4.1f", static_cast<double>(tKessel));
+  snprintf(float_str1, sizeof(float_str1), "%4.1f", static_cast<double>(tVorlauf));
+  snprintf(line0, sizeof(line0), "H:%-5s V:%-5s", float_str0, float_str1); // %6s right pads the string
   lcd.print(line0);
    serial_newline();
    Serial.println(line0);
-  sprintf(line0,"A%d",AussentemperaturRegelung);
+  snprintf(line0, sizeof(line0), "A%d",AussentemperaturRegelung);
   lcd.setCursor(16, 1);
   lcd.print(line0);
    serial_newline();
    Serial.println(line0);
-  sprintf(line0,"P%d",Pumpenloesen);
+  snprintf(line0, sizeof(line0), "P%d",Pumpenloesen);
   lcd.setCursor(18, 1);
   lcd.print(line0);
    serial_newline();
@@ -3138,21 +3767,21 @@ void print_Main_LCD_Values(){
   lcd.setCursor(0, 2);
   lcd.print("                    ");
   lcd.setCursor(0, 2);
-  dtostrf(tAussen,4,1,float_str0);
-  dtostrf(tRoom,4,1,float_str1);
-  sprintf(line0, "A:%-5s R:%-5s", float_str0, float_str1); // %6s right pads the string
+  snprintf(float_str0, sizeof(float_str0), "%4.1f", static_cast<double>(tAussen));
+  snprintf(float_str1, sizeof(float_str1), "%4.1f", static_cast<double>(tRoom));
+  snprintf(line0, sizeof(line0), "A:%-5s R:%-5s", float_str0, float_str1); // %6s right pads the string
   lcd.print(line0);
    serial_newline();
    Serial.println(line0);
 /*  if(asyncMqttClient.connected()){
-    sprintf(line0, "M");
+    snprintf(line0, sizeof(line0), "M");
   }else{
-    sprintf(line0, "-");
+    snprintf(line0, sizeof(line0), "-");
   }
   lcd.setCursor(15, 2);
   lcd.print(line0);
 */
-  sprintf(line0, "SZ%d", Sommerzeit_EinAus);
+  snprintf(line0, sizeof(line0), "SZ%d", Sommerzeit_EinAus);
   lcd.setCursor(17, 2);
   lcd.print(line0);
    serial_newline();
@@ -3160,21 +3789,21 @@ void print_Main_LCD_Values(){
   memset(line0, 0, sizeof line0);//Der Buffer wird geloescht
   memset(float_str0, 0, sizeof float_str0);
   memset(float_str1, 0, sizeof float_str1);
-  dtostrf(tBoiler,4,1,float_str0);
+  snprintf(float_str0, sizeof(float_str0), "%4.1f", static_cast<double>(tBoiler));
   lcd.setCursor(0, 3);
   lcd.print("                    ");
   lcd.setCursor(0, 3);
-  sprintf(line0, "B:%-5s ", float_str0); // %6s right pads the string
+  snprintf(line0, sizeof(line0), "B:%-5s ", float_str0); // %6s right pads the string
   lcd.print(line0);
    serial_newline();
    Serial.println(line0);
-  sprintf(line0, "%02d.%02d. %02d%c%02d", myday, mymonth, myhours, doppelp, myminutes); // %6s right pads the string
+  snprintf(line0, sizeof(line0), "%02d.%02d. %02d%c%02d", myday, mymonth, myhours, doppelp, myminutes); // %6s right pads the string
   lcd.setCursor(8, 3);
   lcd.print(line0);
    serial_newline();
    Serial.println(line0);
   memset(line0, 0, sizeof line0);//Der Buffer wird geloescht
-  sprintf(line0, "Mischer wait -> %d", mischer_wait);
+  snprintf(line0, sizeof(line0), "Mischer wait -> %d", mischer_wait);
   Serial.println(line0);
   esp_task_wdt_reset(); //watchdog Zeit wieder rücksetzen
 }
@@ -3197,6 +3826,7 @@ boolean summertime_EU(int year, byte month, byte day, byte hour, byte tzHours)
 //                        I2C_IO_Extender
 //#################################################################################################################################
 void I2C_IO_Init(uint8_t address, uint8_t data){
+  if (!ioExtenderPresent) return;
   Wire.beginTransmission(address);
   Wire.write(0xF);
   //Wire.write(data); //alle Ausgänge ausschalten
@@ -3204,6 +3834,7 @@ void I2C_IO_Init(uint8_t address, uint8_t data){
 }
 //#################################################################################################################################
 void I2C_IO_BitWrite(uint8_t address, uint8_t data){
+  if (!ioExtenderPresent) return;
   Wire.beginTransmission(address);
   Wire.write(data); //alle Ausgänge ausschalten
   Wire.endTransmission();
@@ -3211,6 +3842,7 @@ void I2C_IO_BitWrite(uint8_t address, uint8_t data){
 //  dataToI2C=I2C_IO_ReadInputs(address);
 }
 uint8_t I2C_IO_ReadInputs(uint8_t address){
+  if (!ioExtenderPresent) return 0xff;
   Wire.beginTransmission(address);
   Wire.requestFrom(address, uint8_t(2));
   uint8_t Data_In = Wire.read();
@@ -3218,7 +3850,54 @@ uint8_t I2C_IO_ReadInputs(uint8_t address){
   return Data_In;
 }
 //#################################################################################################################################
+bool vorlaufFaultOpening = false;
+unsigned long vorlaufFaultStarted = 0;
+constexpr unsigned long VORLAUF_FAULT_OPEN_MS = 20000UL;
+
+bool enforceVorlaufSensorLock() {
+  const bool locked = !sensorIsUsable(1);
+  static bool faultActive = false;
+  if (!locked) {
+    if (faultActive) {
+      vorlaufFaultOpening = false;
+      MischerStop();
+      faultActive = false;
+      Serial.println("Mischer freigegeben: Vorlaufsensor gueltig");
+    }
+    return false;
+  }
+  if (!faultActive) {
+    faultActive = true;
+    vorlaufFaultStarted = millis();
+    vorlaufFaultOpening = true;
+    mischer_wait = 0;
+    mischer_drive = 0;
+    // The fault movement invalidates the previously referenced position.
+    mischer_init_laeuft = false;
+    mischer_init_auf = false;
+    mischer_init_zu = false;
+    previousTime_MischerInit = 0;
+    Serial.println("Vorlaufsensor ungueltig: Mischer einmalig 20 Sekunden AUF");
+  }
+  if (vorlaufFaultOpening &&
+      (unsigned long)(millis() - vorlaufFaultStarted) < VORLAUF_FAULT_OPEN_MS) {
+    // Deliberate fault action, bypassing the normal movement guards.
+    digitalWrite(MischerZu_Pin, LOW);
+    MischerZuRelais = false;
+    digitalWrite(MischerAuf_Pin, HIGH);
+    MischerAufRelais = true;
+  } else {
+    if (vorlaufFaultOpening) {
+      vorlaufFaultOpening = false;
+      Serial.println("Mischer gesperrt: 20-Sekunden-Auffahrt beendet");
+    }
+    MischerStop();
+  }
+  return true;
+}
+
 void MischerInit(){
+  if (enforceVorlaufSensorLock()) return;
   unsigned long currentTime0;
   if(!mischer_init_auf && !mischer_init_laeuft && !mischer_init_zu){
    mischer_init_laeuft=true;
@@ -3247,6 +3926,7 @@ void MischerInit(){
 }
 //#################################################################################################################################
 void MischerAuf(){
+  if (enforceVorlaufSensorLock()) return;
   digitalWrite(MischerZu_Pin, LOW);
   MischerZuRelais=false;
   digitalWrite(MischerAuf_Pin, HIGH);
@@ -3260,6 +3940,7 @@ void MischerAuf(){
 }
 //#################################################################################################################################
 void MischerZu(){
+  if (enforceVorlaufSensorLock()) return;
   digitalWrite(MischerAuf_Pin, LOW);
   MischerAufRelais=false;
   digitalWrite(MischerZu_Pin, HIGH);
@@ -3273,6 +3954,10 @@ void MischerZu(){
 }
 //#################################################################################################################################
 void MischerStop(){
+  // Normal regulation must not interrupt the explicitly requested fault run.
+  // Also check its deadline here, in case another caller reaches us first.
+  if (vorlaufFaultOpening &&
+      (unsigned long)(millis() - vorlaufFaultStarted) < VORLAUF_FAULT_OPEN_MS) return;
   digitalWrite(MischerAuf_Pin, LOW);
   MischerAufRelais=false;
   digitalWrite(MischerZu_Pin, LOW);
@@ -3286,6 +3971,7 @@ void MischerStop(){
 //#################################################################################################################################
 void sensorDS1820_indicateChip(byte pin)
 {
+  if (pin > kTtureSensorMaxIndex) return;
   if ( !sensorDS1820[pin].search(addr)) {
     sensorDS1820[pin].reset_search();
     delay(250);
@@ -3316,6 +4002,7 @@ void sensorDS1820_indicateChip(byte pin)
 //#################################################################################################################################
 void sensorDS1820_reset(byte pin)
 {
+  if (pin > kTtureSensorMaxIndex) return;
   sensorDS1820[pin].reset();
   sensorDS1820[pin].write(0xCC, POWER_MODE);
   sensorDS1820[pin].write(0x44, POWER_MODE);
@@ -3323,9 +4010,10 @@ void sensorDS1820_reset(byte pin)
 //#################################################################################################################################
 void sensorDS1820_read(byte pin)
 {
+  if (pin > kTtureSensorMaxIndex) return;
   float temperature;
   //byte bufData[9];
-  sensorDS1820[pin].reset();
+  if (!sensorDS1820[pin].reset()) { markSensorFailure(pin); return; }
   sensorDS1820[pin].write(0xCC, POWER_MODE);
   sensorDS1820[pin].write(0xBE, POWER_MODE);
   //sensorDS1820[pin].read_bytes(bufData, 9);
@@ -3339,7 +4027,7 @@ int16_t raw;
 //type_s = 0;
 for ( int i = 0; i < 9; i++)
     { data[i] = sensorDS1820[pin].read(); }
-if(OneWire::crc8(data, 8)==data[8]){
+if(validSensorScratchpad(data)){
 
   raw = (data[1] << 8) | data[0];
   if (type_s)
@@ -3360,6 +4048,7 @@ if(OneWire::crc8(data, 8)==data[8]){
     // Default ist 12 Bit Aufloesung, 750 ms Wandlungszeit
     }
   temperature = ((float)raw / 16.0);
+  if (!markSensorSuccess(pin, temperature)) return;
 
 /*****************************************/
   //  temperature= ((float)((int)((unsigned int)bufData[0] | (((unsigned int)bufData[1]) << 8)))) * 0.0625 + 0.03125;
@@ -3402,6 +4091,8 @@ if(OneWire::crc8(data, 8)==data[8]){
         default:
           break;
      }
+  } else {
+    markSensorFailure(pin);
   }
 }
 //#################################################################################################################################
@@ -3472,7 +4163,7 @@ void initWebSocket() {
 }
 
 String processor(const String& var){
-  Serial.println(var);
+  if (var != "WEBTIME") Serial.println(var);
   if(var == "MQTTUPDATE"){
     return asyncMqttClient.getClientId();
   }
@@ -3495,6 +4186,29 @@ String processor(const String& var){
     }
   }else if(var == "TROOM"){
     return readTemperature(tRoom);
+  }else if(var == "GASDAY"){
+    return gasDisplay(true);
+  }else if(var == "GASTOTAL"){
+    return gasDisplay(false);
+  }else if(var == "WEBTIME"){
+    const time_t utc = time(nullptr);
+    if (utc < static_cast<time_t>(1577836800UL)) return "NTP nicht synchron";
+    time_t local = utc + GMT_TIME_ZONE * utcOffsetInSeconds;
+    struct tm calendar = {};
+    if (!gmtime_r(&local, &calendar)) return "Uhrzeit nicht verfuegbar";
+    if (Sommerzeit_EinAus && summertime_EU(calendar.tm_year + 1900,
+        calendar.tm_mon + 1, calendar.tm_mday, calendar.tm_hour, GMT_TIME_ZONE)) {
+      local += 3600;
+      if (!gmtime_r(&local, &calendar)) return "Uhrzeit nicht verfuegbar";
+    }
+    char text[48];
+    snprintf(text, sizeof(text), "%s, %02d.%02d.%04d %02d:%02d:%02d",
+             daysOfTheWeek[calendar.tm_wday], calendar.tm_mday, calendar.tm_mon + 1,
+             calendar.tm_year + 1900, calendar.tm_hour, calendar.tm_min, calendar.tm_sec);
+    return String(text);
+  }else if(var == "BRENNERSPERRE"){
+    return sensorIsUsable(0) ? "Kesselsensor OK - keine Sensorsperre" :
+                              "BRENNER GESPERRT - Kesselsensor ungueltig";
   }else if(var == "TKESSEL"){
     return readTemperature(tKessel);
   }else if(var == "TVORLAUF"){
@@ -3507,6 +4221,22 @@ String processor(const String& var){
     return readTemperature(tKachelofen);
   }else if(var == "KACHELOFENSTATUS"){
     return kachelofenAktiv ? "AKTIV" : "INAKTIV";
+  }else if(var == "BETRIEBSART"){
+    return WinterBetrieb ? "AUTOMATIKBETRIEB" : BoilerBetrieb ? "NUR BOILER" : NurHeizung ? "NUR HEIZUNG" : "AUS";
+  }else if(var == "BETRIEBAUTO"){
+    return WinterBetrieb ? "selected" : "";
+  }else if(var == "BETRIEBBOILER"){
+    return !WinterBetrieb && BoilerBetrieb ? "selected" : "";
+  }else if(var == "BETRIEBHEIZUNG"){
+    return !WinterBetrieb && !BoilerBetrieb && NurHeizung ? "selected" : "";
+  }else if(var == "BETRIEBAUS"){
+    return !WinterBetrieb && !BoilerBetrieb && !NurHeizung ? "selected" : "";
+  }else if(var == "MODEAUTO"){
+    return regelungsModus == REGELUNG_AUTO ? "selected" : "";
+  }else if(var == "MODERAUM"){
+    return regelungsModus == REGELUNG_RAUM ? "selected" : "";
+  }else if(var == "MODEAUSSEN"){
+    return regelungsModus == REGELUNG_AUSSEN ? "selected" : "";
   }else if(var == "REGELUNGSART"){
     if(regelungsModus == REGELUNG_AUTO){
       return AussentemperaturRegelung ? "AUTO / AUSSENTEMPERATUR" : "AUTO / RAUMTEMPERATUR";
@@ -3526,7 +4256,11 @@ String processor(const String& var){
 //#################################################################################################################################
 
 String readTemperature(const float& var){
-    if (isnan(var)) {    
+  const float* readings[5] = {&tKessel, &tVorlauf, &tAussen, &tRoom, &tBoiler};
+  for (byte i = 0; i < 5; ++i) {
+    if (&var == readings[i] && !sensorIsUsable(i)) return "Sensorfehler";
+  }
+    if (!isfinite(var)) {
     return "--";
   }
   else {

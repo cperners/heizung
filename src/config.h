@@ -3,12 +3,13 @@
 // Zentrale Konfiguration der Heizungssteuerung.
 // Zugangsdaten stehen separat in secrets.h.
 #include <IPAddress.h>
+#include "secrets.h"
 
 #define EXMISCHER
 #define WDT_TIMEOUT 200
-#define MQTT_CLIENT_ID "ESP32_Heizung_Test"
-#define MQTT_HOST IPAddress(192, 168, 0, 1)
-#define MQTT_PORT 1883
+
+
+
 #define VORLAUFTEMP 25
 #define AUSSENTEMP 26
 #define KUECHENTEMP 27
@@ -28,7 +29,7 @@
 #define lcd_addr 0x27
 #define keypad_addr 0x20
 #define ioextender0_addr 0x22
-#define MQTT_TEXT "/SmartHome/Test/Heizung/"
+
 #define MENUPAGE_TEMPERATUR 1 ... 6
 #define MENUPAGE_TEMPERATUR1 14 ... 17
 #define MENUPAGE_NUM 7 ... 9
@@ -77,3 +78,5 @@
 #define ANSWER_TIME   1100UL
 #define POWER_MODE 0 //power mode: 0 - external, 1 - parasitic
 #define BOILER_NUMBER 4
+
+#define GAS_MQTT_TOPIC MQTT_TEXT "gaszaehler"

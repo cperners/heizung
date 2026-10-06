@@ -286,7 +286,9 @@ const char index_html[] PROGMEM = R"rawliteral(
 html { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #20343c; text-align: left; }
 body { margin: 0; background: #f1f5f6; line-height: 1.5; }
 .topnav { background: #163b45; padding: 14px 20px; border-bottom: 4px solid #36b6a5; }
-.topnav h1 { display: flex; align-items: center; justify-content: space-between; gap: 12px; max-width: 1120px; margin: 0 auto; font-size: clamp(.9rem, 2.5vw, 1.4rem); line-height: 1.4; color: white; white-space: nowrap; }
+.topnav h1 { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; max-width: 1120px; margin: 0 auto; font-size: clamp(.9rem, 2.5vw, 1.4rem); line-height: 1.4; color: white; white-space: normal; }
+.topnav h1 > span, .topnav time { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+@media (max-width: 540px) { .topnav h1 { flex-direction: column; align-items: flex-start; } }
 .topnav time { font-size: inherit; font-weight: inherit; }
 .topnav hr { border: 0; border-top: 1px solid #ffffff30; margin: 10px 0; }
 .layout { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; max-width: 1168px; margin: 20px auto; padding: 0 24px; }
@@ -343,7 +345,7 @@ form { line-height: 2; font-size: .9rem; }
 </head>
 <body>
   <div class="topnav">
-    <h1><span>ESP32 Heizung</span><span>Laufzeit: <span id="uptime">--</span></span><span style="font-size:.65em;" title="Anteil der Ticks ohne Leerlauf, keine exakte CPU-Zeitmessung">CPU-Sch&auml;tzung: <span id="cpu-load">--</span></span><time id="header-clock">%WEBTIME%</time></h1>
+    <h1><span>ESP32 Heizung</span><span style="font-size:.65em;color:#fef08a;">Laufzeit: <span id="uptime">--</span></span><span style="font-size:.65em;color:#fef08a;" title="Anteil der Ticks ohne Leerlauf, keine exakte CPU-Zeitmessung">CPU-Sch&auml;tzung: <span id="cpu-load">--</span></span><time id="header-clock">%WEBTIME%</time></h1>
   </div>
   <section class="layout">
   <div>
@@ -634,6 +636,7 @@ volatile bool readSensor = false;
 ******************************************************************************************************* */
 volatile int lcd_display_light = 30;
 bool lcdPresent = false;
+uint32_t lcdClearGeneration = 0;
 bool keypadPresent = false;
 bool ioExtenderPresent = false;
 
@@ -643,7 +646,7 @@ public:
   OptionalLCD(uint8_t address, uint8_t columns, uint8_t rows)
     : LiquidCrystal_I2C(address, columns, rows) {}
   void begin() { if (lcdPresent) LiquidCrystal_I2C::begin(); }
-  void clear() { if (lcdPresent) LiquidCrystal_I2C::clear(); }
+  void clear() { ++lcdClearGeneration; if (lcdPresent) LiquidCrystal_I2C::clear(); }
   void setCursor(uint8_t column, uint8_t row) {
     if (lcdPresent) LiquidCrystal_I2C::setCursor(column, row);
   }
@@ -3984,88 +3987,43 @@ void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
                                          print LCD Values
 ******************************************************************************************************* */
 void print_Main_LCD_Values(){
-  char line0[21];
-  char line1[21];
-  char float_str0[32];
-  char float_str1[32];
-
-  lcd.setCursor(0, 0);
-  lcd.print("                    ");
-  snprintf(line1, sizeof(line1), "Br%sH%sB%sA%sZ%s", BrennerRelais ? "+" : "-", HeizungsRelais ? "+" : "-", BoilerRelais ? "+" : "-", MischerAufRelais ? "+" : "-", MischerZuRelais ? "+" : "-");
-  lcd.setCursor(0, 0);
-  lcd.print(line1);
-   serial_go_home();
-   Serial.println(line1);
-  lcd.setCursor(12, 0);
-  snprintf(float_str0, sizeof(float_str0), "%4.1f", static_cast<double>(tmyRoomdest));
-  snprintf(line0, sizeof(line0), "%cR=%s",daynight,float_str0);
-  lcd.print(line0);
-   serial_newline(); 
-   Serial.println(line0);
-  lcd.setCursor(0, 1);
-  lcd.print("                    ");
-  lcd.setCursor(0, 1);
-  snprintf(float_str0, sizeof(float_str0), "%4.1f", static_cast<double>(tKessel));
-  snprintf(float_str1, sizeof(float_str1), "%4.1f", static_cast<double>(tVorlauf));
-  snprintf(line0, sizeof(line0), "H:%-5s V:%-5s", float_str0, float_str1); // %6s right pads the string
-  lcd.print(line0);
-   serial_newline();
-   Serial.println(line0);
-  snprintf(line0, sizeof(line0), "A%d",AussentemperaturRegelung);
-  lcd.setCursor(16, 1);
-  lcd.print(line0);
-   serial_newline();
-   Serial.println(line0);
-  snprintf(line0, sizeof(line0), "P%d",Pumpenloesen);
-  lcd.setCursor(18, 1);
-  lcd.print(line0);
-   serial_newline();
-   Serial.println(line0);
-  memset(line0, 0, sizeof line0);//Der Buffer wird geloescht
-  memset(float_str0, 0, sizeof float_str0);
-  memset(float_str1, 0, sizeof float_str1);
-  lcd.setCursor(0, 2);
-  lcd.print("                    ");
-  lcd.setCursor(0, 2);
-  snprintf(float_str0, sizeof(float_str0), "%4.1f", static_cast<double>(tAussen));
-  snprintf(float_str1, sizeof(float_str1), "%4.1f", static_cast<double>(tRoom));
-  snprintf(line0, sizeof(line0), "A:%-5s R:%-5s", float_str0, float_str1); // %6s right pads the string
-  lcd.print(line0);
-   serial_newline();
-   Serial.println(line0);
-/*  if(asyncMqttClient.connected()){
-    snprintf(line0, sizeof(line0), "M");
-  }else{
-    snprintf(line0, sizeof(line0), "-");
+  if (!lcdPresent) return;
+  char rows[4][21];
+  for (unsigned r=0; r<4; ++r) { memset(rows[r], ' ', 20); rows[r][20]='\0'; }
+  auto put = [&](unsigned row, unsigned column, const char* text) {
+    for (unsigned i=0; text[i] && column+i<20; ++i) rows[row][column+i]=text[i];
+  };
+  auto temperature = [](char* out, size_t size, byte sensor, float value) {
+    if (!sensorIsUsable(sensor) || !isfinite(value)) snprintf(out,size,"X");
+    else snprintf(out,size,"%4.1f",static_cast<double>(value));
+  };
+  char text[32], first[16], second[16];
+  snprintf(text,sizeof(text),"Br%sH%sB%sA%sZ%s",BrennerRelais?"+":"-",HeizungsRelais?"+":"-",BoilerRelais?"+":"-",MischerAufRelais?"+":"-",MischerZuRelais?"+":"-");
+  put(0,0,text);
+  snprintf(text,sizeof(text),"%cR=%4.1f",daynight,static_cast<double>(tmyRoomdest)); put(0,12,text);
+  temperature(first,sizeof(first),0,tKessel); temperature(second,sizeof(second),1,tVorlauf);
+  snprintf(text,sizeof(text),"H:%-5s V:%-5s",first,second); put(1,0,text);
+  snprintf(text,sizeof(text),"A%d",AussentemperaturRegelung); put(1,16,text);
+  snprintf(text,sizeof(text),"P%d",Pumpenloesen); put(1,18,text);
+  temperature(first,sizeof(first),2,tAussen); temperature(second,sizeof(second),3,tRoom);
+  snprintf(text,sizeof(text),"A:%-5s R:%-5s",first,second); put(2,0,text);
+  snprintf(text,sizeof(text),"SZ%d",Sommerzeit_EinAus); put(2,17,text);
+  temperature(first,sizeof(first),4,tBoiler);
+  snprintf(text,sizeof(text),"B:%-5s",first); put(3,0,text);
+  snprintf(text,sizeof(text),"%02d.%02d. %02d%c%02d",myday,mymonth,myhours,doppelp,myminutes); put(3,8,text);
+  static char previous[4][20];
+  static uint32_t previousGeneration = UINT32_MAX;
+  const bool redraw = previousGeneration != lcdClearGeneration;
+  for (unsigned row=0; row<4; ++row) {
+    unsigned col=0;
+    while (col<20) {
+      if (!redraw && previous[row][col]==rows[row][col]) { ++col; continue; }
+      lcd.setCursor(col,row);
+      do { lcd.write(rows[row][col]); previous[row][col]=rows[row][col]; ++col; }
+      while (col<20 && (redraw || previous[row][col]!=rows[row][col]));
+    }
   }
-  lcd.setCursor(15, 2);
-  lcd.print(line0);
-*/
-  snprintf(line0, sizeof(line0), "SZ%d", Sommerzeit_EinAus);
-  lcd.setCursor(17, 2);
-  lcd.print(line0);
-   serial_newline();
-   Serial.println(line0);
-  memset(line0, 0, sizeof line0);//Der Buffer wird geloescht
-  memset(float_str0, 0, sizeof float_str0);
-  memset(float_str1, 0, sizeof float_str1);
-  snprintf(float_str0, sizeof(float_str0), "%4.1f", static_cast<double>(tBoiler));
-  lcd.setCursor(0, 3);
-  lcd.print("                    ");
-  lcd.setCursor(0, 3);
-  snprintf(line0, sizeof(line0), "B:%-5s ", float_str0); // %6s right pads the string
-  lcd.print(line0);
-   serial_newline();
-   Serial.println(line0);
-  snprintf(line0, sizeof(line0), "%02d.%02d. %02d%c%02d", myday, mymonth, myhours, doppelp, myminutes); // %6s right pads the string
-  lcd.setCursor(8, 3);
-  lcd.print(line0);
-   serial_newline();
-   Serial.println(line0);
-  memset(line0, 0, sizeof line0);//Der Buffer wird geloescht
-  snprintf(line0, sizeof(line0), "Mischer wait -> %d", mischer_wait);
-  Serial.println(line0);
-  esp_task_wdt_reset(); //watchdog Zeit wieder rücksetzen
+  previousGeneration=lcdClearGeneration;
 }
 
 boolean summertime_EU(int year, byte month, byte day, byte hour, byte tzHours)

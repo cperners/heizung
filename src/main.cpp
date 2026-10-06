@@ -17,6 +17,8 @@ https://github.com/fedorweems/YouTube/blob/Arduino-Game-V1/ESP8266%20Home%20Auto
 #include <math.h>
 #include <WiFi.h>
 #include <esp_task_wdt.h>
+#include <WiFiUdp.h>
+#include <sys/time.h>
 #include <time.h> // Clock einbinden
 #include <AsyncTCP.h>
 #include <AsyncMqttClient.h>
@@ -32,6 +34,82 @@ https://github.com/fedorweems/YouTube/blob/Arduino-Game-V1/ESP8266%20Home%20Auto
 
 //define externe Mischersteuerung per I2c
 #include "config.h"
+
+
+struct NtpProbeResult { double offsetMs; double delayMs; unsigned long measuredAt; int state; };
+NtpProbeResult ntpProbeResults[3] = {};
+portMUX_TYPE ntpProbeMux = portMUX_INITIALIZER_UNLOCKED;
+const char* ntpProbeServers[3] = {NTP_SERVER1, NTP_SERVER2, NTP_SERVER3};
+static double ntpProbeNow() {
+  timeval tv; gettimeofday(&tv, nullptr);
+  return double(tv.tv_sec) + double(tv.tv_usec) / 1000000.0;
+}
+static uint32_t ntpProbeWord(const uint8_t* p) {
+  return (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) | (uint32_t(p[2]) << 8) | p[3];
+}
+static double ntpProbeStamp(const uint8_t* p) {
+  return double(ntpProbeWord(p)) - 2208988800.0 + double(ntpProbeWord(p+4)) / 4294967296.0;
+}
+void ntpProbeTask(void*) {
+  WiFiUDP udp;
+  for (;;) {
+    for (int i = 0; i < 3; ++i) {
+      NtpProbeResult result = {};
+      result.state = 1; // No usable reply.
+      if (WiFi.status() == WL_CONNECTED && time(nullptr) > 1700000000) {
+        IPAddress address;
+        if (WiFi.hostByName(ntpProbeServers[i], address) && udp.begin(0)) {
+          uint8_t request[48] = {}; request[0] = 0x23;
+          double t1 = ntpProbeNow();
+          uint32_t seconds = uint32_t(t1 + 2208988800.0);
+          uint32_t fraction = uint32_t((t1 - floor(t1)) * 4294967296.0);
+          for (int b=0; b<4; ++b) { request[40+b] = seconds >> (24-8*b); request[44+b] = fraction >> (24-8*b); }
+          udp.beginPacket(address, 123); udp.write(request, sizeof(request));
+          if (udp.endPacket()) {
+            unsigned long start = millis();
+            while (millis() - start < 2000UL) {
+              int size = udp.parsePacket();
+              if (size >= 48) {
+                const double t4 = ntpProbeNow(); uint8_t response[48];
+                int count = udp.read(response, sizeof(response));
+                if (count == 48 && udp.remoteIP() == address && udp.remotePort() == 123 &&
+                    (response[0] & 7) == 4 && (response[0] >> 6) != 3 && response[1] > 0 && response[1] < 16 &&
+                    memcmp(response+24, request+40, 8) == 0) {
+                  const double t2 = ntpProbeStamp(response+32), t3 = ntpProbeStamp(response+40);
+                  const double elapsed = (millis()-start)/1000.0;
+                  const double delay = (t4-t1)-(t3-t2);
+                  if (t2 > 1700000000 && t3 >= t2 && fabs((t4-t1)-elapsed) < 0.1 && delay >= -0.001 && delay < 2.0) {
+                    result.offsetMs = ((t2-t1)+(t3-t4))*500.0;
+                    result.delayMs = fmax(0.0, delay*1000.0); result.state = 2; result.measuredAt = millis();
+                    break;
+                  }
+                }
+              }
+              vTaskDelay(pdMS_TO_TICKS(10));
+            }
+          }
+          udp.stop();
+        }
+      } else result.state = 0;
+      portENTER_CRITICAL(&ntpProbeMux); ntpProbeResults[i] = result; portEXIT_CRITICAL(&ntpProbeMux);
+      vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+    vTaskDelay(pdMS_TO_TICKS(60000));
+  }
+}
+String ntpProbeDisplay() {
+  NtpProbeResult snapshot[3];
+  portENTER_CRITICAL(&ntpProbeMux); memcpy(snapshot, ntpProbeResults, sizeof(snapshot)); portEXIT_CRITICAL(&ntpProbeMux);
+  String text;
+  for (int i=0; i<3; ++i) {
+    text += ntpProbeServers[i]; text += ": ";
+    if (snapshot[i].state == 2) {
+      char line[120]; snprintf(line, sizeof(line), "%+.1f ms (Laufzeit %.1f ms, vor %lu s)", snapshot[i].offsetMs, snapshot[i].delayMs, (millis()-snapshot[i].measuredAt)/1000UL); text += line;
+    } else text += snapshot[i].state == 1 ? "Keine gueltige Antwort" : "Warte auf WLAN und gueltige Zeit";
+    text += "\n";
+  }
+  return text;
+}
 
 //3 seconds WDT
 
@@ -150,6 +228,9 @@ enum RegelungsModus { REGELUNG_AUTO, REGELUNG_RAUM, REGELUNG_AUSSEN };
 RegelungsModus regelungsModus = REGELUNG_AUTO;
 volatile int requestedWebMode = -1;
 int requestedOperatingMode = -1;
+struct RoomSetpointRequest { bool pending; float day; float night; };
+RoomSetpointRequest requestedRoomSetpoints = {};
+portMUX_TYPE roomSetpointMux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE operatingModeMux = portMUX_INITIALIZER_UNLOCKED;
 
 unsigned int jumptoDefault = 0;
@@ -237,7 +318,15 @@ form { line-height: 2; font-size: .9rem; }
 .threshold-hint { font-size: .78rem; color: #607681; margin: 16px 0; }
 .threshold-save { width: 100%; padding: 12px; border: 0; border-radius: 9px; background: #14796c; color: white; font: inherit; font-weight: 600; cursor: pointer; }
 .threshold-save:disabled { opacity: .5; cursor: default; }
-  </style>
+
+.output-status {display:grid;gap:12px;}
+.output-row {display:flex;flex-direction:row-reverse;align-items:center;justify-content:flex-end;gap:12px;}
+.output-indicator {min-width:62px;flex-shrink:0;}
+.output-led {display:inline-block;width:16px;height:16px;border-radius:50%;background:#94a3b8;box-shadow:inset 0 0 3px #0005;flex-shrink:0;}
+.output-led.on {background:#16a34a;box-shadow:0 0 6px #16a34a66;}
+.output-led.off {background:#dc2626;}
+.output-indicator {display:flex;align-items:center;gap:8px;}
+</style>
 <title>ESP32 Heizungs-Server</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css" 
@@ -283,10 +372,15 @@ form { line-height: 2; font-size: .9rem; }
   <p>
   </section>
   <section class="layout">
-  <div>
-    <span class="dht-labels">Kachelofen</span>
-    <span id="tkachelofen">%TKACHELOFEN%</span>
-    <sup class="units">&deg;C</sup>
+  <div><h3>Ausgangsstatus</h3>
+    <div class="output-status">
+      <div class="output-row"><span>Brenner</span><span class="output-indicator"><span id="led-brenner" class="output-led" aria-hidden="true"></span><span id="status-brenner">Wird geladen</span></span></div>
+      <div class="output-row"><span>Boilerpumpe</span><span class="output-indicator"><span id="led-boiler" class="output-led" aria-hidden="true"></span><span id="status-boiler">Wird geladen</span></span></div>
+      <div class="output-row"><span>Heizungspumpe</span><span class="output-indicator"><span id="led-heizung" class="output-led" aria-hidden="true"></span><span id="status-heizung">Wird geladen</span></span></div>
+      <div class="output-row"><span>Mischer auf</span><span class="output-indicator"><span id="led-mischerauf" class="output-led" aria-hidden="true"></span><span id="status-mischerauf">Wird geladen</span></span></div>
+      <div class="output-row"><span>Mischer zu</span><span class="output-indicator"><span id="led-mischerzu" class="output-led" aria-hidden="true"></span><span id="status-mischerzu">Wird geladen</span></span></div>
+    </div>
+    <small>Gr&uuml;n: Ausgang ein &middot; Rot: Ausgang aus</small>
   </div>
   <div>
     <h3>Gasverbrauch heute</h3>
@@ -294,7 +388,6 @@ form { line-height: 2; font-size: .9rem; }
     <p>Seit erster Meldung des Tages</p>
     <small>Gesamtstand: <span id="gas-total">%GASTOTAL%</span> m&sup3;</small>
   </div>
-  <div>Kachelofen: <strong>%KACHELOFENSTATUS%</strong></div>
   <div>
     <h3>Regelung</h3>
     <strong id="regelungsart">%REGELUNGSART%</strong>
@@ -322,6 +415,38 @@ form { line-height: 2; font-size: .9rem; }
       <button class="threshold-save" type="submit">&Uuml;bernehmen</button>
     </form>
   </div>
+  <div><h3>NTP-Zeitserver</h3>
+    <p>Abweichung zur ESP32-Uhr: Plus = Server voraus</p>
+    <pre id="ntp-abweichung" style="white-space:pre-wrap;font:inherit;overflow-wrap:anywhere">Messung wird geladen</pre>
+    <small>Messung etwa jede Minute; Netzwerkwege beeinflussen die Genauigkeit.</small>
+  </div>
+  </section>
+  <section class="layout">
+  <div class="threshold-card">
+    <h3>Wunschraumtemperatur</h3>
+    <form id="room-setpoints" class="threshold-form" action="/raumtemperaturen" method="post">
+      <label for="room-tag">Tag</label>
+      <div class="threshold-row">
+        <button type="button" aria-label="Tagtemperatur senken" onclick="document.getElementById('room-tag').stepDown()">&minus;</button>
+        <div class="threshold-value"><input id="room-tag" name="tag" type="number" min="5" max="40" step="0.1" value="%RAUMTAG%" readonly required><span>&deg;C</span></div>
+        <button type="button" aria-label="Tagtemperatur erh&ouml;hen" onclick="document.getElementById('room-tag').stepUp()">+</button>
+      </div>
+      <label for="room-nacht">Nacht</label>
+      <div class="threshold-row">
+        <button type="button" aria-label="Nachttemperatur senken" onclick="document.getElementById('room-nacht').stepDown()">&minus;</button>
+        <div class="threshold-value"><input id="room-nacht" name="nacht" type="number" min="5" max="40" step="0.1" value="%RAUMNACHT%" readonly required><span>&deg;C</span></div>
+        <button type="button" aria-label="Nachttemperatur erh&ouml;hen" onclick="document.getElementById('room-nacht').stepUp()">+</button>
+      </div>
+      <p id="room-save-status" class="threshold-hint" role="status">&Auml;nderungen werden erst mit Speichern &uuml;bernommen.</p>
+      <button id="room-save" class="threshold-save" type="submit">Wunschtemperaturen speichern</button>
+    </form>
+  </div>
+  <div>
+    <span class="dht-labels">Kachelofen</span>
+    <span id="tkachelofen">%TKACHELOFEN%</span>
+    <sup class="units">&deg;C</sup>
+  </div>
+  <div>Kachelofen: <strong>%KACHELOFENSTATUS%</strong></div>
   <div class="threshold-card">
     <form class="threshold-form" action="/kachelofen" method="get">
   <h3>Kachelofen-Schaltschwellen</h3>
@@ -355,22 +480,6 @@ function adjustThreshold(id, direction) {
 </script>
   </div>
   </section>
-  <section class="layout">
-  <div class="content">
-    <div class="card">
-      <h3>Heizungspumpe</h3>
-      <p class="state">state: <span id="state">%HEIZUNGSPUMPE%</span></p>
-      <p><button id="button" class="button">Toggle</button></p>
-    </div>
-  </div>
-  <div class="content">
-    <div class="card">
-      <h3>Boilerpumpe</h3>
-      <p class="state">state: <span id="state">%BOILERPUMPE%</span></p>
-      <p><button id="button" class="button">Toggle</button></p>
-    </div>
-  </div>
-  </section>
   <p>
   <section class="layout">
   </section>
@@ -382,44 +491,6 @@ function adjustThreshold(id, direction) {
   </section>
   <p>
 <script>
-  var gateway = `ws://${window.location.hostname}/ws`;
-  var websocket;
-  window.addEventListener('load', onLoad);
-  function initWebSocket() {
-    console.log('Trying to open a WebSocket connection...');
-    websocket = new WebSocket(gateway);
-    websocket.onopen    = onOpen;
-    websocket.onclose   = onClose;
-    websocket.onmessage = onMessage; // <-- add this line
-  }
-  function onOpen(event) {
-    console.log('Connection opened');
-  }
-  function onClose(event) {
-    console.log('Connection closed');
-    setTimeout(initWebSocket, 2000);
-  }
-  function onMessage(event) {
-    var state;
-    if (event.data == "1"){
-      state = "ON";
-    }
-    else{
-      state = "OFF";
-    }
-    document.getElementById('state').innerHTML = state;
-  }
-  function onLoad(event) {
-    initWebSocket();
-    initButton();
-  }
-  function initButton() {
-    document.getElementById('button').addEventListener('click', toggle);
-  }
-  function toggle(){
-    websocket.send('toggle');
-  }
-
   setInterval(function ( ) {
   var xhttp = new XMLHttpRequest();
   xhttp.onreadystatechange = function() {
@@ -513,8 +584,60 @@ function updateHeaderClock() {
 setInterval(updateHeaderClock, 1000);
 updateHeaderClock();
 
+document.getElementById('room-setpoints').addEventListener('submit', function(event) {
+  event.preventDefault();
+  var button = document.getElementById('room-save');
+  var status = document.getElementById('room-save-status');
+  button.disabled = true; status.textContent = 'Wird gespeichert...';
+  var body = new URLSearchParams(new FormData(event.target));
+  fetch('/raumtemperaturen', {method:'POST', body:body})
+    .then(function(response) { if (!response.ok) throw new Error();
+      status.textContent = 'Zur Übernahme vorgemerkt. Bitte anschließend neu laden und Werte prüfen.';
+    })
+    .catch(function() { status.textContent = 'Speichern nicht bestätigt. Bitte Verbindung prüfen.'; })
+    .finally(function() { button.disabled = false; });
+});
+
+var outputKeys = ['brenner','boiler','heizung','mischerauf','mischerzu'];
+var outputStatusPending = false;
+function updateOutputStatus() {
+  if (outputStatusPending) return;
+  outputStatusPending = true;
+  var request = new XMLHttpRequest();
+  request.open('GET', '/ausgangsstatus', true); request.timeout = 2500;
+  function unavailable() {
+    outputKeys.forEach(function(key) {
+      document.getElementById('led-'+key).className = 'output-led';
+      document.getElementById('status-'+key).textContent = 'Nicht erreichbar';
+    });
+  }
+  request.onload = function() {
+    if (request.status !== 200) { unavailable(); return; }
+    try {
+      var values = JSON.parse(request.responseText);
+      if (!Array.isArray(values) || values.length !== 5) throw new Error();
+      outputKeys.forEach(function(key, index) {
+        var active = values[index] === 1;
+        document.getElementById('led-'+key).className = 'output-led ' + (active ? 'on' : 'off');
+        document.getElementById('status-'+key).textContent = active ? 'Ein' : 'Aus';
+      });
+    } catch (error) { unavailable(); }
+  };
+  request.onerror = unavailable; request.ontimeout = unavailable;
+  request.onloadend = function() { outputStatusPending = false; };
+  request.send();
+}
+setInterval(updateOutputStatus, 1000); updateOutputStatus();
+
+function updateNtpProbe() {
+  fetch('/ntp-abweichung', {cache:'no-store'})
+    .then(function(response) { if (!response.ok) throw new Error(); return response.text(); })
+    .then(function(text) { document.getElementById('ntp-abweichung').textContent = text; })
+    .catch(function() { document.getElementById('ntp-abweichung').textContent = 'Nicht erreichbar'; });
+}
+setInterval(updateNtpProbe, 5000); updateNtpProbe();
 setInterval(function() {
-  fetch('/betriebsart', {cache: 'no-store'})
+  fetch('/betriebsart' , {cache: 'no-store'})
     .then(function(response) { if (!response.ok) throw new Error(); return response.text(); })
     .then(function(text) { document.getElementById('betriebsart').textContent = text; })
     .catch(function() { document.getElementById('betriebsart').textContent = 'Betriebsstatus nicht erreichbar'; });
@@ -1338,7 +1461,7 @@ void setup() {
     "TimeString", "MQTTUPDATE", "HEIZUNGSPUMPE", "BOILERPUMPE",
     "TROOM", "TAUSSEN", "TKESSEL", "TVORLAUF", "TBOILER",
     "TKACHELOFEN", "KACHELOFENSTATUS", "REGELUNGSART",
-    "KACHELOFENEIN", "KACHELOFENAUS", "WIFISSID", "WIFIRSSI", "BRENNERSPERRE", "WEBTIME", "MODEAUTO", "MODERAUM", "MODEAUSSEN", "GASDAY", "GASTOTAL", "BETRIEBSART", "BETRIEBAUTO", "BETRIEBBOILER", "BETRIEBHEIZUNG", "BETRIEBAUS"
+    "KACHELOFENEIN", "KACHELOFENAUS", "WIFISSID", "WIFIRSSI", "BRENNERSPERRE", "WEBTIME", "MODEAUTO", "MODERAUM", "MODEAUSSEN", "GASDAY", "GASTOTAL", "BETRIEBSART", "BETRIEBAUTO", "BETRIEBBOILER", "BETRIEBHEIZUNG", "BETRIEBAUS", "RAUMTAG", "RAUMNACHT"
   };
   for (const char* name : placeholders) {
     page.replace(String("%") + name + "%", processor(String(name)));
@@ -1348,6 +1471,37 @@ void setup() {
   server.on("/gas", HTTP_GET, [](AsyncWebServerRequest *request){
     const bool daily = request->hasParam("daily");
     request->send(200, "text/plain; charset=utf-8", gasDisplay(daily));
+  });
+  server.on("/raumtemperaturen", HTTP_POST, [](AsyncWebServerRequest *request){
+    if (!request->hasParam("tag", true) || !request->hasParam("nacht", true)) {
+      request->send(400, "text/plain; charset=utf-8", "Tag und Nacht erforderlich"); return;
+    }
+    const String dayText = request->getParam("tag", true)->value();
+    const String nightText = request->getParam("nacht", true)->value();
+    char *dayEnd = nullptr, *nightEnd = nullptr;
+    const float day = strtof(dayText.c_str(), &dayEnd), night = strtof(nightText.c_str(), &nightEnd);
+    if (dayText.length() > 16 || nightText.length() > 16 || dayEnd == dayText.c_str() || *dayEnd != '\0' ||
+        nightEnd == nightText.c_str() || *nightEnd != '\0' || !isfinite(day) || !isfinite(night) ||
+        day < 5 || day > 40 || night < 5 || night > 40) {
+      request->send(400, "text/plain; charset=utf-8", "Ungueltige Wunschtemperaturen (5 bis 40 Grad)"); return;
+    }
+    portENTER_CRITICAL(&roomSetpointMux);
+    requestedRoomSetpoints = {true, day, night};
+    portEXIT_CRITICAL(&roomSetpointMux);
+    request->send(202, "text/plain; charset=utf-8", "Uebernahme vorgemerkt");
+  });
+  server.on("/ausgangsstatus", HTTP_GET, [](AsyncWebServerRequest *request){
+    char result[32];
+    snprintf(result, sizeof(result), "[%d,%d,%d,%d,%d]",
+      digitalRead(BrennerPin) == HIGH, digitalRead(BoilerPin) == HIGH,
+      digitalRead(HeizungPin) == HIGH, digitalRead(MischerAuf_Pin) == HIGH,
+      digitalRead(MischerZu_Pin) == HIGH);
+    AsyncWebServerResponse* response = request->beginResponse(200, "application/json", result);
+    response->addHeader("Cache-Control", "no-store");
+    request->send(response);
+  });
+  server.on("/ntp-abweichung", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send(200, "text/plain; charset=utf-8", ntpProbeDisplay());
   });
   server.on("/betriebsart", HTTP_POST, [](AsyncWebServerRequest *request){
     if (!request->hasParam("modus", true)) {
@@ -1430,6 +1584,10 @@ void setup() {
                                          MAIN LOOP
 ******************************************************************************************************* */
 void loop(){
+  static bool ntpProbeStarted = false;
+  if (!ntpProbeStarted) {
+    ntpProbeStarted = xTaskCreate(ntpProbeTask, "ntp-probe", 4096, nullptr, 1, nullptr) == pdPASS;
+  }
   ElegantOTA.loop();
   processMqttMessages();
   processGasReading();
@@ -1446,6 +1604,16 @@ void loop(){
     EEPROM.put(EEADDRESS_BOILER_SOMMERBETRIEB, BoilerBetrieb);
     EEPROM.put(EEADDRESS_NUR_HEIZUNG, NurHeizung);
     EEPROM.commit();
+  }
+  portENTER_CRITICAL(&roomSetpointMux);
+  const RoomSetpointRequest roomRequest = requestedRoomSetpoints;
+  requestedRoomSetpoints.pending = false;
+  portEXIT_CRITICAL(&roomSetpointMux);
+  if (roomRequest.pending) {
+    tRoomTag = roomRequest.day; tRoomNacht = roomRequest.night;
+    EEPROM.put(EEADDRESS_RAUM, tRoomTag);
+    EEPROM.put(EEADDRESS_RAUMNACHT, tRoomNacht);
+    if (!EEPROM.commit()) Serial.println("Wunschtemperaturen: Speichern fehlgeschlagen");
   }
   const int webMode = requestedWebMode;
   if (webMode >= 0) {
@@ -4231,6 +4399,10 @@ String processor(const String& var){
     return !WinterBetrieb && !BoilerBetrieb && NurHeizung ? "selected" : "";
   }else if(var == "BETRIEBAUS"){
     return !WinterBetrieb && !BoilerBetrieb && !NurHeizung ? "selected" : "";
+  }else if(var == "RAUMTAG"){
+    return String(tRoomTag, 1);
+  }else if(var == "RAUMNACHT"){
+    return String(tRoomNacht, 1);
   }else if(var == "MODEAUTO"){
     return regelungsModus == REGELUNG_AUTO ? "selected" : "";
   }else if(var == "MODERAUM"){

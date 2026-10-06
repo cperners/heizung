@@ -731,6 +731,53 @@ char doppelp = ' ';
 /* *******************************************************************************************************
                                          SETUP
 ******************************************************************************************************* */
+// Bestehende Einstellungen erhalten; uninitialisierte Werte einzeln reparieren.
+template <typename T>
+bool repairSetting(int address, T fallback, double minimum, double maximum) {
+  T value;
+  EEPROM.get(address, value);
+  if (isfinite(static_cast<double>(value)) && value >= minimum && value <= maximum) return false;
+  EEPROM.put(address, fallback);
+  Serial.printf("Einstellung an Speicherstelle %d auf Standardwert gesetzt\n", address);
+  return true;
+}
+
+bool repairSchedule(int address, float fallback) {
+  float value;
+  EEPROM.get(address, value);
+  if (isfinite(value) && value >= 0.0f && value < 24.0f) {
+    const int hours = static_cast<int>(value);
+    const int minutes = static_cast<int>(roundf((value - hours) * 100.0f));
+    if (minutes >= 0 && minutes <= 59) return false;
+  }
+  EEPROM.put(address, fallback);
+  Serial.printf("Schaltzeit an Speicherstelle %d auf Standardwert gesetzt\n", address);
+  return true;
+}
+
+void initializeStoredSettings() {
+  bool changed = false;
+  changed |= repairSetting(EEADDRESS_BOILER, eeBoiler, 0, 100);
+  changed |= repairSetting(EEADDRESS_RAUM, eeRaum, 5, 40);
+  changed |= repairSetting(EEADDRESS_RAUMNACHT, eeRaumNacht, 5, 40);
+  changed |= repairSetting(EEADDRESS_KESSEL, eeKessel, 0, 100);
+  changed |= repairSetting(EEADDRESS_DIFFRAUM, eeDiffRaum, 0, 20);
+  changed |= repairSetting(EEADDRESS_DIFFKESSEL, eeDiffKessel, 0, 100);
+  changed |= repairSetting(EEADDRESS_DIFFBOILER, eeDiffBoiler, 0, 100);
+  changed |= repairSetting(EEADDRESS_TVMAX, eetvmax, 0, 100);
+  changed |= repairSetting(EEADDRESS_TAUMIN, eetaumin, 0, 50);
+  changed |= repairSetting(EEADDRESS_NN, een, 0.1, 10);
+  changed |= repairSetting(EEADDRESS_AUSSENTEMPREGELUNG, eeAuTempRegel, 0, 1);
+  changed |= repairSetting(EEADDRESS_WINTER, eeWinter, 0, 1);
+  changed |= repairSetting(EEADDRESS_BOILER_SOMMERBETRIEB, eeBoilerBetrieb, 0, 1);
+  changed |= repairSetting(EEADDRESS_NUR_HEIZUNG, eeNurHeizung, 0, 1);
+  changed |= repairSetting(EEADDRESS_SOMMERZEIT_EINAUS, eeSommerzeit_EinAus, 0, 1);
+  changed |= repairSetting(EEADDRESS_BR_LAUFZEIT, eeBrennerLaufzeit, 0, 2147483647);
+  changed |= repairSchedule(EEADDRESS_TAG, eeTag);
+  changed |= repairSchedule(EEADDRESS_NACHT, eeNacht);
+  if (changed && !EEPROM.commit()) Serial.println("Einstellungen konnten nicht gespeichert werden");
+}
+
 void setup() {
   Serial.begin(BAUD_RATE);
   esp_task_wdt_init(WDT_TIMEOUT, true); //disable panic so ESP32 restarts
@@ -742,31 +789,12 @@ void setup() {
   pinMode(MischerAuf_Pin, OUTPUT);
   pinMode(MischerZu_Pin, OUTPUT);
 
-  EEPROM.begin(EE_SIZE);
-//EEPROM.put() nur 1x beim 1. initialisieren der Variablen auskommentieren
- //hier anfang
- /*
-  EEPROM.put(EEADDRESS_BOILER, eeBoiler);
-  EEPROM.put(EEADDRESS_RAUM, eeRaum);
-  EEPROM.put(EEADDRESS_KESSEL, eeKessel);
-  EEPROM.put(EEADDRESS_DIFFRAUM, eeDiffRaum);
-  EEPROM.put(EEADDRESS_DIFFKESSEL, eeDiffKessel);
-  EEPROM.put(EEADDRESS_DIFFBOILER, eeDiffBoiler);
-  EEPROM.put(EEADDRESS_RAUMNACHT, eeRaumNacht);
-  EEPROM.put(EEADDRESS_TAG, eeTag);
-  EEPROM.put(EEADDRESS_NACHT, eeNacht);
-  EEPROM.put(EEADDRESS_WINTER, eeWinter);
-  EEPROM.put(EEADDRESS_BOILER_SOMMERBETRIEB, eeBoilerBetrieb);
-  EEPROM.put(EEADDRESS_NUR_HEIZUNG, eeNurHeizung);
-  EEPROM.put(EEADDRESS_BR_LAUFZEIT, eeBrennerLaufzeit);
-  EEPROM.put(EEADDRESS_SOMMERZEIT_EINAUS, eeSommerzeit_EinAus);
-  EEPROM.put(EEADDRESS_TVMAX, eetvmax);
-  EEPROM.put(EEADDRESS_TAUMIN, eetaumin);
-  EEPROM.put(EEADDRESS_NN, een);
-  EEPROM.put(EEADDRESS_AUSSENTEMPREGELUNG, eeAuTempRegel);
-  EEPROM.commit();
-*/
- // hier ende
+  if (!EEPROM.begin(EE_SIZE)) {
+    Serial.println("Einstellungsspeicher konnte nicht gestartet werden");
+    while (true) { delay(1000); }
+  }
+  initializeStoredSettings();
+
   delay(6000);//Wait for newly restarted system to stabilize
 
 //float tVorlauf,tAussen,tKessel,tKesselDest,tKesselDiff,tBoiler,tBoilerDest,tBoilerDiff,tRoom,tRoomTag,tRoomDiff;
@@ -824,7 +852,7 @@ void setup() {
   Serial.println(kachelofenAusTemp, 1);
   EEPROM.get( EEADDRESS_TAG, TagBegin );
   TagBeginHr = (int)(TagBegin);
-  TagBeginMi = (int)((TagBegin - TagBeginHr)*100);
+  TagBeginMi = static_cast<int>(roundf((TagBegin - TagBeginHr)*100.0f));
   Serial.println( TagBegin, 2 );
   Serial.print("Tag - \n");
   Serial.println( TagBeginHr );
@@ -833,7 +861,7 @@ void setup() {
   Serial.print("...\n");
   EEPROM.get( EEADDRESS_NACHT, NachtBegin );
   NachtBeginHr = (int)(NachtBegin);
-  NachtBeginMi = (int)((NachtBegin - NachtBeginHr)*100);
+  NachtBeginMi = static_cast<int>(roundf((NachtBegin - NachtBeginHr)*100.0f));
   Serial.println( TagBegin, 2 );
   Serial.print("Nacht - \n");
   Serial.println( NachtBeginHr );
@@ -1435,7 +1463,7 @@ void checkEingabe() {
           case 10:
             TagBegin=f_char;
             TagBeginHr = (int)(TagBegin);
-            TagBeginMi = (int)((TagBegin - TagBeginHr)*100);
+            TagBeginMi = static_cast<int>(roundf((TagBegin - TagBeginHr)*100.0f));
             EEPROM.put(EEADDRESS_TAG, f_char);
             lcd.print(" ->");
             lcd.print(f_char);
@@ -1443,7 +1471,7 @@ void checkEingabe() {
           case 11:
             NachtBegin=f_char;
             NachtBeginHr = (int)(NachtBegin);
-            NachtBeginMi = (int)((NachtBegin - NachtBeginHr)*100);
+            NachtBeginMi = static_cast<int>(roundf((NachtBegin - NachtBeginHr)*100.0f));
             EEPROM.put(EEADDRESS_NACHT, f_char);
             lcd.print(" ->");
             lcd.print(f_char);

@@ -99,10 +99,7 @@ void ntpupdate() {
            dd,
            static_cast<unsigned>(mysecunds));
 
-  if (!MenuPage) {
-    lcd.setCursor(0, 3);
-    lcd.print(TimeString);
-  }
+  // LCD date/time is rendered by print_Main_LCD_Values(), without weekday.
 }
 /* *******************************************************************************************************
                                          WiFiEvent

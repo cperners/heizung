@@ -118,7 +118,7 @@ portMUX_TYPE webSettingsMux = portMUX_INITIALIZER_UNLOCKED;
 struct KachelofenThresholdRequest { bool pending; float ein; float aus; };
 KachelofenThresholdRequest requestedKachelofenThresholds = {};
 int requestedOperatingMode = -1;
-struct RoomSetpointRequest { bool pending; float day; float night; uint32_t id; };
+struct RoomSetpointRequest { bool pending; float day; float night; uint32_t id; bool hasSchedule; uint16_t dayMinutes; uint16_t nightMinutes; };
 struct RoomSaveResult { uint32_t id; byte state; };
 RoomSaveResult roomSaveResults[8] = {};
 uint32_t nextRoomSaveId = 0;

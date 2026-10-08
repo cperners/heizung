@@ -6,7 +6,7 @@ const char index_html[] PROGMEM = R"rawliteral(
   <meta charset="utf-8">
   <title>ESP Web Server</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="icon" href="data:,">
+
   <style>
 /* Darstellung der Heizungsuebersicht */
 * { box-sizing: border-box; }
@@ -68,7 +68,7 @@ form { line-height: 2; font-size: .9rem; }
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css" 
         integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqyi7RrhN7udi9RwhKkMHpvLbHG9Sr" crossorigin="anonymous">
-<link rel="icon" href="data:,">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNyIgZmlsbD0iIzE2M2I0NSIvPjxwYXRoIGQ9Ik0xNyAzYzEgNi01IDctNCAxMiAyLTEgMy0zIDMtNSA1IDQgOSA4IDcgMTQtMSA0LTQgNi04IDYtNSAwLTktNC05LTkgMC01IDQtOCA1LTExIDAgNCAxIDUgMiA2LTEtNSA1LTcgNC0xM3oiIGZpbGw9IiNmYmJmMjQiLz48cGF0aCBkPSJNMTYgMTdjMSAzLTMgNC0zIDcgMCAyIDEgNCAzIDRzNC0yIDQtNGMwLTMtMi00LTQtN3oiIGZpbGw9IiNmYjkyM2MiLz48L3N2Zz4K">
 </head>
 <body>
   <div class="topnav">
@@ -174,8 +174,13 @@ form { line-height: 2; font-size: .9rem; }
         <div class="threshold-value"><input id="room-nacht" name="nacht" type="number" min="5" max="40" step="0.1" value="%RAUMNACHT%" readonly required><span>&deg;C</span></div>
         <button type="button" aria-label="Nachttemperatur erh&ouml;hen" onclick="document.getElementById('room-nacht').stepUp()">+</button>
       </div>
+      <label for="day-start">Tagbetrieb ab</label>
+      <input id="day-start" name="tagzeit" type="time" step="60" value="%TAGZEIT%" required style="max-width:100%;font:inherit;padding:8px;border:1px solid #bdcdd3;border-radius:7px;">
+      <label for="night-start">Nachtbetrieb ab</label>
+      <input id="night-start" name="nachtzeit" type="time" step="60" value="%NACHTZEIT%" required style="max-width:100%;font:inherit;padding:8px;border:1px solid #bdcdd3;border-radius:7px;">
+      <small>Tagbeginn muss vor Nachtbeginn liegen.</small>
       <p id="room-save-status" class="threshold-hint" role="status">&Auml;nderungen werden erst mit Speichern &uuml;bernommen.</p>
-      <button id="room-save" class="threshold-save" type="submit">Wunschtemperaturen speichern</button>
+      <button id="room-save" class="threshold-save" type="submit">Temperaturen und Zeiten speichern</button>
     </form>
   </div>
   <div>
@@ -234,7 +239,7 @@ function roomSaveRequest(url, method, body) {
     request.open(method, url, true); request.timeout = 2500;
     if (body) request.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
     request.onload = function() {
-      if (request.status < 200 || request.status >= 300) { reject(new Error('Anfrage abgelehnt')); return; }
+      if (request.status < 200 || request.status >= 300) { reject(new Error(request.responseText || 'Anfrage abgelehnt')); return; }
       try { resolve(JSON.parse(request.responseText)); } catch (error) { reject(error); }
     };
     request.onerror = request.ontimeout = function() { reject(new Error('Keine Antwort')); };
@@ -253,12 +258,12 @@ document.getElementById('room-setpoints').addEventListener('submit', async funct
     for (var attempt = 0; attempt < 20; ++attempt) {
       await new Promise(function(resolve) { setTimeout(resolve, 500); });
       var result = await roomSaveRequest('/raumtemperaturen-status?id='+accepted.id, 'GET');
-      if (result.state === 2) { status.textContent = 'Wunschtemperaturen gespeichert.'; confirmed = true; break; }
+      if (result.state === 2) { status.textContent = 'Temperaturen und Zeiten gespeichert.'; confirmed = true; break; }
       if (result.state === 3) { status.textContent = 'Speichern fehlgeschlagen. Bisherige Werte bleiben aktiv.'; confirmed = true; break; }
     }
     if (!confirmed) status.textContent = 'Speichern noch nicht bestätigt. Bitte neu laden und Werte prüfen.';
   } catch (error) {
-    status.textContent = 'Speichern nicht bestätigt. Bitte neu laden und Werte prüfen.';
+    status.textContent = 'Speichern nicht bestätigt: ' + error.message;
   } finally { button.disabled = false; }
 });
 

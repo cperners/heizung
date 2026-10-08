@@ -39,6 +39,7 @@ https://github.com/fedorweems/YouTube/blob/Arduino-Game-V1/ESP8266%20Home%20Auto
 
 
 #include "web/page.h"
+#include "web/schedule.h"
 #include "diagnostics/cpu_load.h"
 #include "ntp_diagnostics/ntp_diagnostics.h"
 

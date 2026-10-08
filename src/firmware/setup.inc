@@ -213,7 +213,7 @@ void setup() {
     "TimeString", "MQTTUPDATE", "HEIZUNGSPUMPE", "BOILERPUMPE",
     "TROOM", "TAUSSEN", "TKESSEL", "TVORLAUF", "TBOILER",
     "TKACHELOFEN", "KACHELOFENSTATUS", "REGELUNGSART",
-    "KACHELOFENEIN", "KACHELOFENAUS", "WIFISSID", "WIFIRSSI", "BRENNERSPERRE", "WEBTIME", "MODEAUTO", "MODERAUM", "MODEAUSSEN", "GASDAY", "GASTOTAL", "BETRIEBSART", "BETRIEBAUTO", "BETRIEBBOILER", "BETRIEBHEIZUNG", "BETRIEBAUS", "RAUMTAG", "RAUMNACHT"
+    "KACHELOFENEIN", "KACHELOFENAUS", "WIFISSID", "WIFIRSSI", "BRENNERSPERRE", "WEBTIME", "MODEAUTO", "MODERAUM", "MODEAUSSEN", "GASDAY", "GASTOTAL", "BETRIEBSART", "BETRIEBAUTO", "BETRIEBBOILER", "BETRIEBHEIZUNG", "BETRIEBAUS", "RAUMTAG", "RAUMNACHT", "TAGZEIT", "NACHTZEIT"
   };
   for (const char* name : placeholders) {
     page.replace(String("%") + name + "%", processor(String(name)));
@@ -247,6 +247,14 @@ void setup() {
         day < 5 || day > 40 || night < 5 || night > 40) {
       request->send(400, "text/plain; charset=utf-8", "Ungueltige Wunschtemperaturen (5 bis 40 Grad)"); return;
     }
+    const bool hasSchedule = request->hasParam("tagzeit", true) || request->hasParam("nachtzeit", true);
+    uint16_t dayMinutes = 0, nightMinutes = 0;
+    if (hasSchedule && (!request->hasParam("tagzeit", true) || !request->hasParam("nachtzeit", true) ||
+        !parseScheduleTime(request->getParam("tagzeit", true)->value().c_str(), dayMinutes) ||
+        !parseScheduleTime(request->getParam("nachtzeit", true)->value().c_str(), nightMinutes) ||
+        dayMinutes >= nightMinutes)) {
+      request->send(400, "text/plain; charset=utf-8", "Ungueltige Zeiten: HH:MM, Tagbeginn muss vor Nachtbeginn liegen"); return;
+    }
     uint32_t id = 0;
     portENTER_CRITICAL(&roomSetpointMux);
     if (!requestedRoomSetpoints.pending) {
@@ -256,7 +264,7 @@ void setup() {
       if (result.state != 1) {
         nextRoomSaveId = id = candidate;
         result = {id, 1};
-        requestedRoomSetpoints = {true, day, night, id};
+        requestedRoomSetpoints = {true, day, night, id, hasSchedule, dayMinutes, nightMinutes};
       }
     }
     portEXIT_CRITICAL(&roomSetpointMux);

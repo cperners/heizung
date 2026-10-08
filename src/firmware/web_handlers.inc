@@ -112,6 +112,12 @@ String processor(const String& var){
     return !WinterBetrieb && !BoilerBetrieb && NurHeizung ? "selected" : "";
   }else if(var == "BETRIEBAUS"){
     return !WinterBetrieb && !BoilerBetrieb && !NurHeizung ? "selected" : "";
+  }else if(var == "TAGZEIT" || var == "NACHTZEIT"){
+    char text[6];
+    const int hour = var == "TAGZEIT" ? TagBeginHr : NachtBeginHr;
+    const int minute = var == "TAGZEIT" ? TagBeginMi : NachtBeginMi;
+    snprintf(text, sizeof(text), "%02d:%02d", hour, minute);
+    return String(text);
   }else if(var == "RAUMTAG"){
     return String(tRoomTag, 1);
   }else if(var == "RAUMNACHT"){

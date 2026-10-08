@@ -26,12 +26,29 @@ void loop(){
   portEXIT_CRITICAL(&roomSetpointMux);
   if (roomRequest.pending) {
     const float previousDay = tRoomTag, previousNight = tRoomNacht;
+    const float previousTagBegin = TagBegin, previousNachtBegin = NachtBegin;
+    const float newTagBegin = roomRequest.dayMinutes/60 + (roomRequest.dayMinutes%60)/100.0f;
+    const float newNachtBegin = roomRequest.nightMinutes/60 + (roomRequest.nightMinutes%60)/100.0f;
+    if (roomRequest.hasSchedule) {
+      EEPROM.put(EEADDRESS_TAG, newTagBegin);
+      EEPROM.put(EEADDRESS_NACHT, newNachtBegin);
+    }
     EEPROM.put(EEADDRESS_RAUM, roomRequest.day);
     EEPROM.put(EEADDRESS_RAUMNACHT, roomRequest.night);
     const bool saved = EEPROM.commit();
     if (saved) {
       tRoomTag = roomRequest.day; tRoomNacht = roomRequest.night;
+      if (roomRequest.hasSchedule) {
+        TagBegin = newTagBegin; NachtBegin = newNachtBegin;
+        TagBeginHr = roomRequest.dayMinutes/60; TagBeginMi = roomRequest.dayMinutes%60;
+        NachtBeginHr = roomRequest.nightMinutes/60; NachtBeginMi = roomRequest.nightMinutes%60;
+        Schaltuhr();
+      }
     } else {
+      if (roomRequest.hasSchedule) {
+        EEPROM.put(EEADDRESS_TAG, previousTagBegin);
+        EEPROM.put(EEADDRESS_NACHT, previousNachtBegin);
+      }
       EEPROM.put(EEADDRESS_RAUM, previousDay);
       EEPROM.put(EEADDRESS_RAUMNACHT, previousNight);
       Serial.println("Wunschtemperaturen: Speichern fehlgeschlagen");

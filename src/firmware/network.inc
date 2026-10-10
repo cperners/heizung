@@ -115,7 +115,14 @@ void mqttupdate() {
   doc["Uhrzeit"].set(line0);
   doc["WlanRetry"].set(wifi_retry);
   doc["WlanRSSI"].set(WiFi.RSSI());
-  doc["atRegelung"].set(AussentemperaturRegelung);
+  int mqttRegelungsArt = -1;
+  switch (regelungsModus) {
+    case REGELUNG_RAUM: mqttRegelungsArt = 0; break;
+    case REGELUNG_AUSSEN: mqttRegelungsArt = 1; break;
+    case REGELUNG_AUTO: mqttRegelungsArt = 2; break;
+    default: break;
+  }
+  doc["atRegelung"].set(mqttRegelungsArt);
   doc["PumpenNachlauf"].set(PumpenNachlauf);
   doc["tvmax"].set(tvmax);
   doc["taumin"].set(taumin);

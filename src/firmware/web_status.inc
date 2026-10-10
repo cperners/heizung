@@ -2,6 +2,33 @@ constexpr size_t WEB_STATUS_CAPACITY = 2048;
 char webStatusCache[WEB_STATUS_CAPACITY] = {};
 size_t webStatusLength = 0;
 portMUX_TYPE webStatusMux = portMUX_INITIALIZER_UNLOCKED;
+// Update only for a new measurement, not for every browser poll.
+struct TemperatureTrend {
+  bool hasPrevious = false;
+  unsigned long stamp = 0;
+  float previous = 0;
+  int direction = 0;
+};
+TemperatureTrend temperatureTrends[6];
+void addTemperatureTrend(JsonArray trends, byte index, float value,
+                         unsigned long stamp, bool valid) {
+  TemperatureTrend& trend = temperatureTrends[index];
+  if (!valid || !isfinite(value)) {
+    trend.hasPrevious = false;
+    trend.direction = 0;
+    trends.add(nullptr);
+    return;
+  }
+  if (!trend.hasPrevious || stamp != trend.stamp) {
+    const float difference = value - trend.previous;
+    trend.direction = !trend.hasPrevious ? 0 :
+                      difference >= 0.09999f ? 1 : difference <= -0.09999f ? -1 : 0;
+    trend.previous = value;
+    trend.stamp = stamp;
+    trend.hasPrevious = true;
+  }
+  trends.add(trend.direction);
+}
 void refreshWebStatus() {
   static unsigned long lastRefresh = 0;
   static uint32_t generation = 0;
@@ -17,6 +44,14 @@ void refreshWebStatus() {
   values["tvorlauf"] = readTemperature(tVorlauf);
   values["tboiler"] = readTemperature(tBoiler);
   values["tkachelofen"] = readTemperature(tKachelofen);
+  JsonArray trends = doc["trends"].to<JsonArray>();
+  addTemperatureTrend(trends, 0, tRoom, sensorLastSuccess[3], sensorIsUsable(3));
+  addTemperatureTrend(trends, 1, tAussen, sensorLastSuccess[2], sensorIsUsable(2));
+  addTemperatureTrend(trends, 2, tKessel, sensorLastSuccess[0], sensorIsUsable(0));
+  addTemperatureTrend(trends, 3, tVorlauf, sensorLastSuccess[1], sensorIsUsable(1));
+  addTemperatureTrend(trends, 4, tBoiler, sensorLastSuccess[4], sensorIsUsable(4));
+  addTemperatureTrend(trends, 5, tKachelofen, kachelofenLastUpdate,
+                      kachelofenLastUpdate != 0 && now-kachelofenLastUpdate <= kachelofenTimeout);
   values["header-clock"] = processor("WEBTIME");
   const uint64_t uptimeSeconds = static_cast<uint64_t>(esp_timer_get_time()) / 1000000ULL;
   char uptimeText[64];

@@ -31,6 +31,9 @@ p { font-size: 1rem; margin: 14px 0; }
 .dht-labels { display: block; font-size: .9rem; color: #607681; padding-bottom: 8px; }
 #troom, #taussen, #tkessel, #tvorlauf, #tboiler, #tkachelofen { font-size: 1.8rem; font-weight: 700; letter-spacing: -.04em; color: #163b45; }
 .units { font-size: .9rem; color: #607681; }
+.temperature-trend { display: inline-block; margin-left: 6px; font-size: 1.3rem; font-weight: 700; color: #607681; vertical-align: baseline; }
+.temperature-trend.up { color: #c2410c; }
+.temperature-trend.down { color: #0369a1; }
 strong { display: block; margin-top: 8px; color: #14796c; font-size: 1rem; }
 .button, input[type="submit"] { border: 0; border-radius: 9px; background: #14796c; color: white; padding: 10px 18px; font: inherit; font-weight: 600; cursor: pointer; }
 .button:hover, input[type="submit"]:hover { background: #105f55; }
@@ -268,11 +271,25 @@ document.getElementById('room-setpoints').addEventListener('submit', async funct
 });
 
 var outputKeys = ['brenner','boiler','heizung','mischerauf','mischerzu'];
+var temperatureKeys = ['troom','taussen','tkessel','tvorlauf','tboiler','tkachelofen'];
+temperatureKeys.forEach(function(key) {
+  var arrow = document.createElement('span');
+  arrow.id = key+'-trend'; arrow.className = 'temperature-trend';
+  document.getElementById(key).insertAdjacentElement('afterend', arrow);
+});
+function showTemperatureTrend(key, direction) {
+  var arrow = document.getElementById(key+'-trend');
+  var label = direction === 1 ? 'Temperatur steigt' : direction === -1 ? 'Temperatur sinkt' : direction === 0 ? 'Temperatur gleichbleibend oder erste Messung' : 'Kein gueltiger Trend';
+  arrow.textContent = direction === 1 ? '\u2191' : direction === -1 ? '\u2193' : direction === 0 ? '\u2194' : '';
+  arrow.className = 'temperature-trend' + (direction === 1 ? ' up' : direction === -1 ? ' down' : '');
+  arrow.title = label; arrow.setAttribute('aria-label', label);
+}
 var statusTextKeys = ['troom','taussen','tkessel','tvorlauf','tboiler','tkachelofen','header-clock','brennersperre','regelungsart','betriebsart','gas-day','gas-total','ntp-abweichung','kachelofen-status','uptime','cpu-load'];
 var sharedStatusPending = false;
 var lastStatusGeneration = null;
 var lastStatusChange = Date.now();
 function unavailableSharedStatus() {
+  temperatureKeys.forEach(function(key) { showTemperatureTrend(key, null); });
   outputKeys.forEach(function(key) {
     document.getElementById('led-'+key).className = 'output-led';
     document.getElementById('status-'+key).textContent = 'Nicht erreichbar';
@@ -293,9 +310,12 @@ function updateSharedStatus() {
       if (!data.values || !Array.isArray(data.outputs) || data.outputs.length !== 5 || typeof data.generation !== 'number') throw new Error();
       statusTextKeys.forEach(function(key) { if (typeof data.values[key] !== 'string') throw new Error(); });
       data.outputs.forEach(function(value) { if (value !== 0 && value !== 1) throw new Error(); });
+      if (!Array.isArray(data.trends) || data.trends.length !== temperatureKeys.length) throw new Error();
+      data.trends.forEach(function(value) { if (value !== null && value !== -1 && value !== 0 && value !== 1) throw new Error(); });
       if (lastStatusGeneration !== data.generation) { lastStatusGeneration = data.generation; lastStatusChange = Date.now(); }
       if (Date.now()-lastStatusChange > 6000) { unavailableSharedStatus(); return; }
       statusTextKeys.forEach(function(key) { document.getElementById(key).textContent = data.values[key]; });
+      temperatureKeys.forEach(function(key, index) { showTemperatureTrend(key, data.trends[index]); });
       outputKeys.forEach(function(key, index) {
         var active = data.outputs[index] === 1;
         document.getElementById('led-'+key).className = 'output-led ' + (active ? 'on' : 'off');

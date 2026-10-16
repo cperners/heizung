@@ -231,6 +231,15 @@ function adjustThreshold(id, direction) {
   <p>
   <section class="layout">
   <div>WLAN-SSID: <span id="wifi_rssi">%WIFISSID%</span></div>
+  <div><h3>Systemdiagnose</h3>
+    <p>Speicher frei: <span id="heap-free">--</span><br>
+    Minimum seit Start: <span id="heap-min">--</span><br>
+    Gr&ouml;&szlig;ter freier Block: <span id="heap-largest">--</span></p>
+    <p>Schleifenabstand, zuletzt max.: <span id="loop-recent">--</span><br>
+    Maximum seit Start: <span id="loop-max">--</span><br>
+    Abst&auml;nde &uuml;ber 100 ms: <span id="loop-slow">--</span></p>
+    <small>Abstand zwischen zwei Schleifenstarts inklusive Wartezeiten; keine reine CPU-Rechenzeit. Historische Maxima bleiben bis zum Neustart erhalten.</small>
+  </div>
   <div>WLAN-Signal: <span id="wifi_rssi">%WIFIRSSI%</span></div>
   <div><input type="range" onchange="updateSliderTimer(this)" id="wifi_rssis" min="-100" max="-10" value="%WIFIRSSI%" step="1" class="slider2"></div>
   </section>
@@ -286,9 +295,23 @@ function showTemperatureTrend(key, direction) {
 }
 var statusTextKeys = ['troom','taussen','tkessel','tvorlauf','tboiler','tkachelofen','header-clock','brennersperre','regelungsart','betriebsart','gas-day','gas-total','ntp-abweichung','kachelofen-status','uptime','cpu-load'];
 var sharedStatusPending = false;
+var diagnosticKeys = ['heap-free','heap-min','heap-largest','loop-recent','loop-max','loop-slow'];
+function showDiagnostics(health) {
+  var fields = ['heapFreeBytes','heapMinBytes','heapLargestBlockBytes','loopRecentMaxMs','loopMaxMs','loopOver100ms'];
+  var valid = health && fields.every(function(key) { return typeof health[key] === 'number' && Number.isFinite(health[key]) && health[key] >= 0; });
+  diagnosticKeys.forEach(function(key, index) {
+    var text = '--';
+    if (valid) {
+      var value = health[fields[index]];
+      text = index < 3 ? (value/1024).toFixed(1)+' KiB' : index < 5 ? value.toFixed(1)+' ms' : String(value);
+    }
+    document.getElementById(key).textContent = text;
+  });
+}
 var lastStatusGeneration = null;
 var lastStatusChange = Date.now();
 function unavailableSharedStatus() {
+  showDiagnostics(null);
   temperatureKeys.forEach(function(key) { showTemperatureTrend(key, null); });
   outputKeys.forEach(function(key) {
     document.getElementById('led-'+key).className = 'output-led';
@@ -315,6 +338,7 @@ function updateSharedStatus() {
       if (lastStatusGeneration !== data.generation) { lastStatusGeneration = data.generation; lastStatusChange = Date.now(); }
       if (Date.now()-lastStatusChange > 6000) { unavailableSharedStatus(); return; }
       statusTextKeys.forEach(function(key) { document.getElementById(key).textContent = data.values[key]; });
+      showDiagnostics(data.diagnostics);
       temperatureKeys.forEach(function(key, index) { showTemperatureTrend(key, data.trends[index]); });
       outputKeys.forEach(function(key, index) {
         var active = data.outputs[index] === 1;

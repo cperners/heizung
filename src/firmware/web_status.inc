@@ -1,4 +1,4 @@
-constexpr size_t WEB_STATUS_CAPACITY = 2048;
+constexpr size_t WEB_STATUS_CAPACITY = 3072;
 char webStatusCache[WEB_STATUS_CAPACITY] = {};
 size_t webStatusLength = 0;
 portMUX_TYPE webStatusMux = portMUX_INITIALIZER_UNLOCKED;
@@ -36,6 +36,7 @@ void refreshWebStatus() {
   if (generation != 0 && now-lastRefresh < 1000UL) return;
   lastRefresh = now;
   JsonDocument doc;
+  addRuntimeDiagnostics(doc);
   doc["generation"] = ++generation;
   JsonObject values = doc["values"].to<JsonObject>();
   values["troom"] = readTemperature(tRoom);

@@ -1,4 +1,5 @@
 void loop(){
+  updateRuntimeDiagnostics();
   static bool ntpProbeStarted = false;
   if (!ntpProbeStarted) {
     ntpProbeStarted = xTaskCreate(ntpProbeTask, "ntp-probe", 4096, nullptr, 1, nullptr) == pdPASS;

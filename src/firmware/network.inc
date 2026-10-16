@@ -85,6 +85,7 @@ void mqttupdate() {
   char line0[48];
   char buffer[2048];
   JsonDocument doc;
+  addRuntimeDiagnostics(doc);
   doc["S0Kessel"].set(tKessel);
   doc["S1Vorlauf"].set(tVorlauf);
   doc["S2Aussen"].set(tAussen);

@@ -18,6 +18,7 @@ https://github.com/fedorweems/YouTube/blob/Arduino-Game-V1/ESP8266%20Home%20Auto
 #include <WiFi.h>
 #include <esp_task_wdt.h>
 #include <esp_timer.h>
+#include <esp_heap_caps.h>
 #include <WiFiUdp.h>
 #include <sys/time.h>
 #include <time.h> // Clock einbinden
@@ -45,6 +46,7 @@ https://github.com/fedorweems/YouTube/blob/Arduino-Game-V1/ESP8266%20Home%20Auto
 
 #include "firmware/shared_state.inc"
 #include "firmware/runtime_support.inc"
+#include "firmware/runtime_diagnostics.inc"
 #include "firmware/web_status.inc"
 #include "firmware/setup.inc"
 #include "firmware/loop.inc"

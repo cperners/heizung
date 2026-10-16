@@ -110,7 +110,8 @@ bool kachelofenAktiv = false;
 unsigned long kachelofenLastUpdate = 0;
 float kachelofenEinTemp = 50.0;
 float kachelofenAusTemp = 40.0;
-const unsigned long kachelofenTimeout = 10UL * 60UL * 1000UL;
+// LoRaWAN liefert alle 5 Minuten; zwei ausgefallene Meldungen ueberbruecken.
+const unsigned long kachelofenTimeout = 16UL * 60UL * 1000UL;
 enum RegelungsModus { REGELUNG_AUTO, REGELUNG_RAUM, REGELUNG_AUSSEN };
 RegelungsModus regelungsModus = REGELUNG_AUTO;
 int requestedWebMode = -1;

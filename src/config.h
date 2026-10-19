@@ -19,6 +19,10 @@
 #define BAUD_RATE 115200
 #define MISCHER_WAIT 30
 #define MISCHER_DRIVE 5
+// Einmalige Schliessfahrt beim Wechsel auf Betriebsart AUS (auch Start in AUS).
+#define MISCHER_AUS_ZUFAHRT_MINUTEN 2UL
+// Schliessfahrt in AUS erst bei gueltiger Kesseltemperatur <= diesem Wert.
+#define MISCHER_AUS_KESSEL_MAX_TEMP 30.0f
 #define MISCHER_INIT_TIME_ZU 6000
 #define MISCHER_INIT_TIME_AUF 10000
 #define MISCHER_AUF_PIN 18

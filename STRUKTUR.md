@@ -18,6 +18,7 @@ Diese `.cpp`-Dateien kompiliert PlatformIO eigenständig. Die `.h`-Dateien besch
 | --- | --- |
 | `shared_state.inc` | Gemeinsame Variablen, Gerätedefinitionen, Timer und Funktionsdeklarationen |
 | `runtime_support.inc` | Gaszähler, Sensorvalidierung und Reparatur gespeicherter Einstellungen |
+| `runtime_diagnostics.inc` | Freier/minimaler Heap, größter freier Speicherblock und Schleifenabstände für Web/MQTT |
 | `setup.inc` | Initialisierung, Webrouten und Start der Dienste |
 | `loop.inc` | Hauptschleife, Auftragsübernahme und zyklische Verarbeitung |
 | `web_status.inc` | Gemeinsamer Status-Snapshot für die Webseite |
@@ -52,3 +53,9 @@ pio run -e nodemcuv2
 ```
 
 Die Umstrukturierung wurde erfolgreich kompiliert. Ausgelagerte Firmwareabschnitte wurden vor dem Build durch Wiederzusammenfügen auf unveränderten Inhalt geprüft. Die Firmware wurde anschließend per OTA hochgeladen; der Anwender hat den Betrieb bestätigt. Ein mehrtägiger Stabilitätstest sowie der gezielte LCD-Menürückkehrtest stehen noch aus.
+
+## Mischer bei Betriebsart Aus
+
+In `src/config.h` stehen `MISCHER_AUS_ZUFAHRT_MINUTEN` (2 Minuten) und `MISCHER_AUS_KESSEL_MAX_TEMP` (30 °C). In Aus bleiben beide Richtungen zunächst aus. Erst bei gültiger Kesseltemperatur bis zur Grenze startet die einmalige Schließfahrt. Bei wärmerem oder ungültigem Kesselsensor wird unterbrochen; nach erneuter Freigabe beginnt die volle Zeit neu. Nach Abschluss bleiben beide Richtungen aus. Wiedereinschalten bricht ab und gibt die vorhandene Initialisierung frei. Das gilt auch beim Start in Aus und hat dort Vorrang vor der Sensorfehler-Auffahrt. Der erste Gerätetest wurde vom Betreiber als passend gemeldet; eine vollständige Fehlerfallprüfung steht aus.
+
+Der Kachelofen-MQTT-Timeout beträgt 16 Minuten und steht derzeit noch in `shared_state.inc`. Seine Auslagerung nach `config.h` ist vorgemerkt.

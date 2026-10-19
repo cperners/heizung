@@ -446,6 +446,7 @@ void MischerAuf();
 void MischerZu();
 void MischerStop();
 bool enforceVorlaufSensorLock();
+void updateMischerOffMode();
 void SetToRT_Regelung();
 void sensorDS1820_indicateChip(byte pin);
 void sensorDS1820_reset(byte pin);

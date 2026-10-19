@@ -78,6 +78,7 @@ void loop(){
     updateKachelofenStatus();
   }
   enforceKesselSensorLock();
+  updateMischerOffMode();
   enforceVorlaufSensorLock();
   publishBrennerSensorLock();
   publishSensorStates();

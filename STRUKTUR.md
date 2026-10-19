@@ -59,3 +59,19 @@ Die Umstrukturierung wurde erfolgreich kompiliert. Ausgelagerte Firmwareabschnit
 In `src/config.h` stehen `MISCHER_AUS_ZUFAHRT_MINUTEN` (2 Minuten) und `MISCHER_AUS_KESSEL_MAX_TEMP` (30 °C). In Aus bleiben beide Richtungen zunächst aus. Erst bei gültiger Kesseltemperatur bis zur Grenze startet die einmalige Schließfahrt. Bei wärmerem oder ungültigem Kesselsensor wird unterbrochen; nach erneuter Freigabe beginnt die volle Zeit neu. Nach Abschluss bleiben beide Richtungen aus. Wiedereinschalten bricht ab und gibt die vorhandene Initialisierung frei. Das gilt auch beim Start in Aus und hat dort Vorrang vor der Sensorfehler-Auffahrt. Der erste Gerätetest wurde vom Betreiber als passend gemeldet; eine vollständige Fehlerfallprüfung steht aus.
 
 Der Kachelofen-MQTT-Timeout beträgt 16 Minuten und steht derzeit noch in `shared_state.inc`. Seine Auslagerung nach `config.h` ist vorgemerkt.
+
+## Urlaubsbetrieb
+
+Die Web-Betriebsart Urlaub verwendet durchgehend `tRoomUrlaub` (Anfangswert `URLAUB_DEFAULT_TEMP`, 15 °C) mit Raumregelung. Tag-/Nachtzeit und Kachelofen-Automatik bestimmen dann nicht den aktiven Sollwert bzw. die wirksame Regelungsart. Die normale Regelungsmodus-Auswahl bleibt erhalten und wird nach Verlassen von Urlaub wieder wirksam. Die Boileranforderung ist aus; vorhandene Sensorfehler-Nachläufe bleiben wirksam.
+
+Die Urlaubstemperatur ist im Webformular für Wunschtemperaturen in 0,1-Grad-Schritten von 5 bis 40 °C einstellbar. Sie wird zusammen mit den übrigen Formulareinstellungen in der Hauptschleife gespeichert und erst nach erfolgreichem Commit aktiv. Modus und Temperatur bleiben nach Neustart erhalten. EEPROM-emulierter Speicher wurde am Ende um die Adressen 160 (Temperatur) und 168 (Aktivflag) auf 176 Byte erweitert; vorhandene Adressen bleiben unverändert.
+
+`applyOperatingMode()` übernimmt Web-Betriebsarten sowie den neuen MQTT-Urlaubsbefehl mit Speicherung vor Laufzeitübernahme. Alte Betriebsartenbefehle bzw. LCD-Betriebsartänderungen beenden Urlaub. MQTT auf dem bestehenden `set`-Thema:
+
+- `seturlaub`: Urlaub aktivieren, Antwort `h_urlaub`.
+- `urlaubTemp:16.5`: Urlaubstemperatur speichern, Antwort `h_urlaubtemp`; aktiviert Urlaub nicht von selbst.
+- Ungültige Urlaubstemperatur: `h_urlaubtemp_invalid`; Speicherfehler: `h_save_error`.
+
+Die Antwort kommt im bestehenden JSON-Feld `answer` im nächsten Statusversand. Status enthält außerdem `urlaubAktiv`, `urlaubTemperatur` und Betriebsartkennung `U`. Der ausgewählte Regelungsmodus in `atRegelung` bleibt die normale Auswahl; während Urlaub ist die wirksame Regelung unabhängig davon Raumregelung.
+
+WLAN-SSID und RSSI sind in einer gemeinsamen Kachel, beide werden über den Status-Snapshot aktualisiert. Der bisherige unbeschriftete WLAN-Schieberegler ist entfernt. Build, lokale Abläufe, MQTT-Grenzfälle und JavaScript/Platzhalter wurden geprüft. Ein Gerätetest für Urlaub einschließlich Neustart/Persistenz steht noch aus.

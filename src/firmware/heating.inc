@@ -34,6 +34,23 @@ void Boilerbetrieb(){
 /* *******************************************************************************************************
                                          Heizungsbetrieb
 ******************************************************************************************************* */
+void Urlaubsbetrieb() {
+  RoomHeizen = true;
+  KesselHeizen = true;
+  BoilerHeizen = false;
+  BoilerAnforderung = false;
+  BoilerAufheizen = false;
+  BoilerRelais = false;
+  tmyRoomdest = tRoomUrlaub;
+  RoomAnforderungf();
+  // A previous boiler demand must not keep the burner on during vacation.
+  if (!RoomAnforderung) BrennerRelais = false;
+  if (chckKessel()) chckRoom();
+  else HeizungsRelais = false;
+  if (!mischer_init_laeuft) MischerStop();
+  SetOutPin();
+}
+
 void Heizungsbetrieb() {
   RoomHeizen=true;
   KesselHeizen=true;
@@ -139,7 +156,9 @@ void updateKachelofenStatus(){
   }
 
   // AUTO folgt dem Kachelofen. RAUM/AUSSEN sind manuelle Service-Overrides.
-  if(regelungsModus == REGELUNG_AUTO){
+  if (UrlaubBetrieb) {
+    AussentemperaturRegelung = 0;
+  }else if(regelungsModus == REGELUNG_AUTO){
     AussentemperaturRegelung = kachelofenAktiv ? 1 : 0;
   }else if(regelungsModus == REGELUNG_RAUM){
     AussentemperaturRegelung = 0;
@@ -208,13 +227,14 @@ bool pumpOutputWithFault(PumpFaultState& state, bool fault, bool requested,
 }
 
 void SetOutPin(){
+  if (UrlaubBetrieb) { BoilerRelais = false; BoilerAnforderung = false; BoilerAufheizen = false; }
   enforceKesselSensorLock();
   const bool heatingFault = heatingPumpSensorFault();
   const bool boilerFault = boilerPumpSensorFault();
   const bool heatingOn = pumpOutputWithFault(heatingPumpFault, heatingFault,
       HeizungsRelais || Pumpenloesen, HeizungPin, "Heizungspumpe");
   const bool boilerOn = pumpOutputWithFault(boilerPumpFault, boilerFault,
-      BoilerRelais || Pumpenloesen, BoilerPin, "Boilerpumpe");
+      BoilerRelais || (Pumpenloesen && !UrlaubBetrieb), BoilerPin, "Boilerpumpe");
   if (heatingFault) RoomAnforderung = false;
   if (boilerFault) { BoilerAnforderung = false; BoilerAufheizen = false; }
   HeizungsRelais = heatingOn;

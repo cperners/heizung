@@ -103,13 +103,15 @@ String processor(const String& var){
   }else if(var == "KACHELOFENSTATUS"){
     return kachelofenAktiv ? "AKTIV" : "INAKTIV";
   }else if(var == "BETRIEBSART"){
-    return WinterBetrieb ? "AUTOMATIKBETRIEB" : BoilerBetrieb ? "NUR BOILER" : NurHeizung ? "NUR HEIZUNG" : "AUS";
+    return UrlaubBetrieb ? "URLAUBSBETRIEB" : WinterBetrieb ? "AUTOMATIKBETRIEB" : BoilerBetrieb ? "NUR BOILER" : NurHeizung ? "NUR HEIZUNG" : "AUS";
   }else if(var == "BETRIEBAUTO"){
     return WinterBetrieb ? "selected" : "";
   }else if(var == "BETRIEBBOILER"){
     return !WinterBetrieb && BoilerBetrieb ? "selected" : "";
   }else if(var == "BETRIEBHEIZUNG"){
-    return !WinterBetrieb && !BoilerBetrieb && NurHeizung ? "selected" : "";
+    return !UrlaubBetrieb && !WinterBetrieb && !BoilerBetrieb && NurHeizung ? "selected" : "";
+  }else if(var == "BETRIEBURLAUB"){
+    return UrlaubBetrieb ? "selected" : "";
   }else if(var == "BETRIEBAUS"){
     return !WinterBetrieb && !BoilerBetrieb && !NurHeizung ? "selected" : "";
   }else if(var == "TAGZEIT" || var == "NACHTZEIT"){
@@ -118,6 +120,8 @@ String processor(const String& var){
     const int minute = var == "TAGZEIT" ? TagBeginMi : NachtBeginMi;
     snprintf(text, sizeof(text), "%02d:%02d", hour, minute);
     return String(text);
+  }else if(var == "RAUMURLAUB"){
+    return String(tRoomUrlaub, 1);
   }else if(var == "RAUMTAG"){
     return String(tRoomTag, 1);
   }else if(var == "RAUMNACHT"){
@@ -129,6 +133,7 @@ String processor(const String& var){
   }else if(var == "MODEAUSSEN"){
     return regelungsModus == REGELUNG_AUSSEN ? "selected" : "";
   }else if(var == "REGELUNGSART"){
+    if (UrlaubBetrieb) return "URLAUB / RAUMTEMPERATUR";
     if(regelungsModus == REGELUNG_AUTO){
       return AussentemperaturRegelung ? "AUTO / AUSSENTEMPERATUR" : "AUTO / RAUMTEMPERATUR";
     }

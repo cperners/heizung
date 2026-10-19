@@ -224,6 +224,8 @@ bool repairSchedule(int address, float fallback) {
 
 void initializeStoredSettings() {
   bool changed = false;
+  changed |= repairSetting(EEADDRESS_URLAUB_TEMP, URLAUB_DEFAULT_TEMP, 5, 40);
+  changed |= repairSetting(EEADDRESS_URLAUB_AKTIV, byte(0), 0, 1);
   changed |= repairSetting(EEADDRESS_BOILER, eeBoiler, 0, 100);
   changed |= repairSetting(EEADDRESS_RAUM, eeRaum, 5, 40);
   changed |= repairSetting(EEADDRESS_RAUMNACHT, eeRaumNacht, 5, 40);
@@ -256,3 +258,35 @@ struct PendingMqttMessage {
 constexpr unsigned MQTT_QUEUE_LENGTH = 8;
 QueueHandle_t mqttMessageQueue = nullptr;
 
+
+void leaveVacationMode() {
+  UrlaubBetrieb = 0;
+  EEPROM.put(EEADDRESS_URLAUB_AKTIV, UrlaubBetrieb);
+}
+
+bool applyOperatingMode(int operatingMode) {
+  if (operatingMode < 0 || operatingMode > 4) return false;
+  {
+    const byte winter = operatingMode == 0;
+    const byte boiler = operatingMode == 1;
+    const byte heating = operatingMode == 2 || operatingMode == 4;
+    const byte vacation = operatingMode == 4;
+    EEPROM.put(EEADDRESS_WINTER, winter);
+    EEPROM.put(EEADDRESS_BOILER_SOMMERBETRIEB, boiler);
+    EEPROM.put(EEADDRESS_NUR_HEIZUNG, heating);
+    EEPROM.put(EEADDRESS_URLAUB_AKTIV, vacation);
+    if (EEPROM.commit()) {
+      WinterBetrieb = winter; BoilerBetrieb = boiler; NurHeizung = heating;
+      UrlaubBetrieb = vacation;
+      Betriebsart = vacation ? 'U' : winter ? 'A' : boiler ? 'B' : heating ? 'H' : '0';
+      return true;
+    } else {
+      EEPROM.put(EEADDRESS_WINTER, WinterBetrieb);
+      EEPROM.put(EEADDRESS_BOILER_SOMMERBETRIEB, BoilerBetrieb);
+      EEPROM.put(EEADDRESS_NUR_HEIZUNG, NurHeizung);
+      EEPROM.put(EEADDRESS_URLAUB_AKTIV, UrlaubBetrieb);
+      Serial.println("Betriebsart: Speichern fehlgeschlagen, bisheriger Modus bleibt aktiv");
+    }
+  }
+  return false;
+}

@@ -147,10 +147,11 @@ form { line-height: 2; font-size: .9rem; }
     <form action="/betriebsart" method="post">
       <p><label for="betrieb-auswahl">Betriebsart ausw&auml;hlen</label></p>
       <p><select id="betrieb-auswahl" name="modus" style="width:100%;padding:12px;font:inherit;border:1px solid #cbd9dd;border-radius:8px">
-        <option value="auto" %BETRIEBAUTO%>Automatikbetrieb</option>
-        <option value="boiler" %BETRIEBBOILER%>Nur Boiler</option>
-        <option value="heizung" %BETRIEBHEIZUNG%>Nur Heizung</option>
         <option value="aus" %BETRIEBAUS%>Aus</option>
+        <option value="auto" %BETRIEBAUTO%>Automatikbetrieb</option>
+        <option value="heizung" %BETRIEBHEIZUNG%>Nur Heizung</option>
+        <option value="boiler" %BETRIEBBOILER%>Nur Boiler</option>
+        <option value="urlaub" %BETRIEBURLAUB%>Urlaub</option>
       </select></p>
       <button class="threshold-save" type="submit">&Uuml;bernehmen</button>
     </form>
@@ -177,6 +178,13 @@ form { line-height: 2; font-size: .9rem; }
         <div class="threshold-value"><input id="room-nacht" name="nacht" type="number" min="5" max="40" step="0.1" value="%RAUMNACHT%" readonly required><span>&deg;C</span></div>
         <button type="button" aria-label="Nachttemperatur erh&ouml;hen" onclick="document.getElementById('room-nacht').stepUp()">+</button>
       </div>
+      <label for="room-urlaub">Urlaub</label>
+      <div class="threshold-row">
+        <button type="button" aria-label="Urlaubstemperatur senken" onclick="document.getElementById('room-urlaub').stepDown()">&minus;</button>
+        <div class="threshold-value"><input id="room-urlaub" name="urlaub" type="number" min="5" max="40" step="0.1" value="%RAUMURLAUB%" readonly required><span>&deg;C</span></div>
+        <button type="button" aria-label="Urlaubstemperatur erh&ouml;hen" onclick="document.getElementById('room-urlaub').stepUp()">+</button>
+      </div>
+      <small>Im Urlaubsbetrieb gilt diese Raumtemperatur durchgehend; die Boilerbereitung ist aus. Fehlernachlauf kann eine laufende Boilerpumpe vor&uuml;bergehend weiter betreiben.</small>
       <label for="day-start">Tagbetrieb ab</label>
       <input id="day-start" name="tagzeit" type="time" step="60" value="%TAGZEIT%" required style="max-width:100%;font:inherit;padding:8px;border:1px solid #bdcdd3;border-radius:7px;">
       <label for="night-start">Nachtbetrieb ab</label>
@@ -230,7 +238,10 @@ function adjustThreshold(id, direction) {
   </section>
   <p>
   <section class="layout">
-  <div>WLAN-SSID: <span id="wifi_rssi">%WIFISSID%</span></div>
+  <div><h3>WLAN</h3>
+    <p>Netzwerk: <span id="wifi-ssid">%WIFISSID%</span><br>
+    Signalst&auml;rke: <span id="wifi-rssi">%WIFIRSSI%</span> dBm</p>
+  </div>
   <div><h3>Systemdiagnose</h3>
     <p>Speicher frei: <span id="heap-free">--</span><br>
     Minimum seit Start: <span id="heap-min">--</span><br>
@@ -240,8 +251,6 @@ function adjustThreshold(id, direction) {
     Abst&auml;nde &uuml;ber 100 ms: <span id="loop-slow">--</span></p>
     <small>Abstand zwischen zwei Schleifenstarts inklusive Wartezeiten; keine reine CPU-Rechenzeit. Historische Maxima bleiben bis zum Neustart erhalten.</small>
   </div>
-  <div>WLAN-Signal: <span id="wifi_rssi">%WIFIRSSI%</span></div>
-  <div><input type="range" onchange="updateSliderTimer(this)" id="wifi_rssis" min="-100" max="-10" value="%WIFIRSSI%" step="1" class="slider2"></div>
   </section>
   <p>
 <script>
@@ -293,7 +302,7 @@ function showTemperatureTrend(key, direction) {
   arrow.className = 'temperature-trend' + (direction === 1 ? ' up' : direction === -1 ? ' down' : '');
   arrow.title = label; arrow.setAttribute('aria-label', label);
 }
-var statusTextKeys = ['troom','taussen','tkessel','tvorlauf','tboiler','tkachelofen','header-clock','brennersperre','regelungsart','betriebsart','gas-day','gas-total','ntp-abweichung','kachelofen-status','uptime','cpu-load'];
+var statusTextKeys = ['troom','taussen','tkessel','tvorlauf','tboiler','tkachelofen','header-clock','brennersperre','regelungsart','betriebsart','gas-day','gas-total','ntp-abweichung','kachelofen-status','uptime','cpu-load','wifi-ssid','wifi-rssi'];
 var sharedStatusPending = false;
 var diagnosticKeys = ['heap-free','heap-min','heap-largest','loop-recent','loop-max','loop-slow'];
 function showDiagnostics(health) {

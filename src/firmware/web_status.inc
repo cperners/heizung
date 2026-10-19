@@ -63,9 +63,11 @@ void refreshWebStatus() {
            static_cast<unsigned>(uptimeSeconds % 60ULL));
   values["uptime"] = uptimeText;
   values["cpu-load"] = cpuLoadDisplay();
+  values["wifi-ssid"] = ssid;
+  values["wifi-rssi"] = String(WiFi.RSSI());
   values["brennersperre"] = sensorIsUsable(0) ? "Kesselsensor OK - keine Sensorsperre" : "BRENNER GESPERRT - Kesselsensor ungueltig";
-  values["regelungsart"] = regelungsModus == REGELUNG_AUTO ? (AussentemperaturRegelung ? "AUTO / AUSSENTEMPERATUR" : "AUTO / RAUMTEMPERATUR") : (regelungsModus == REGELUNG_RAUM ? "MANUELL / RAUMTEMPERATUR" : "MANUELL / AUSSENTEMPERATUR");
-  values["betriebsart"] = WinterBetrieb ? "AUTOMATIKBETRIEB" : BoilerBetrieb ? "NUR BOILER" : NurHeizung ? "NUR HEIZUNG" : "AUS";
+  values["regelungsart"] = UrlaubBetrieb ? "URLAUB / RAUMTEMPERATUR" : regelungsModus == REGELUNG_AUTO ? (AussentemperaturRegelung ? "AUTO / AUSSENTEMPERATUR" : "AUTO / RAUMTEMPERATUR") : (regelungsModus == REGELUNG_RAUM ? "MANUELL / RAUMTEMPERATUR" : "MANUELL / AUSSENTEMPERATUR");
+  values["betriebsart"] = UrlaubBetrieb ? "URLAUBSBETRIEB" : WinterBetrieb ? "AUTOMATIKBETRIEB" : BoilerBetrieb ? "NUR BOILER" : NurHeizung ? "NUR HEIZUNG" : "AUS";
   values["gas-day"] = gasDisplay(true);
   values["gas-total"] = gasDisplay(false);
   values["ntp-abweichung"] = ntpProbeDisplay();

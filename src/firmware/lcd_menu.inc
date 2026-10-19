@@ -241,6 +241,7 @@ void checkEingabe() {
       int i_char;
       i_char = atoi(keyBuffer);
       if(i_char>1){i_char=1;}
+      if (MenuPage >= 7 && MenuPage <= 9) leaveVacationMode();
       switch (MenuPage) {
         case 7:
           WinterBetrieb=i_char;

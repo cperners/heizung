@@ -17,6 +17,8 @@ void setup() {
     while (true) { delay(1000); }
   }
   initializeStoredSettings();
+  EEPROM.get(EEADDRESS_URLAUB_TEMP, tRoomUrlaub);
+  EEPROM.get(EEADDRESS_URLAUB_AKTIV, UrlaubBetrieb);
   gasStorageReady = gasStorage.begin("gas-meter", false);
   if (gasStorageReady) {
     gasDayBase = gasStorage.getDouble("base", NAN);
@@ -102,6 +104,7 @@ void setup() {
   Serial.println(NurHeizung);
   Serial.print("-NurHeizung\n");
   EEPROM.get( EEADDRESS_WINTER, WinterBetrieb );
+  if (UrlaubBetrieb) { WinterBetrieb = 0; BoilerBetrieb = 0; NurHeizung = 1; }
   Serial.println(WinterBetrieb);
   Serial.print("-WinterBetrieb\n");
   EEPROM.get( EEADDRESS_BR_LAUFZEIT, BrennerLaufzeit );
@@ -213,7 +216,7 @@ void setup() {
     "TimeString", "MQTTUPDATE", "HEIZUNGSPUMPE", "BOILERPUMPE",
     "TROOM", "TAUSSEN", "TKESSEL", "TVORLAUF", "TBOILER",
     "TKACHELOFEN", "KACHELOFENSTATUS", "REGELUNGSART",
-    "KACHELOFENEIN", "KACHELOFENAUS", "WIFISSID", "WIFIRSSI", "BRENNERSPERRE", "WEBTIME", "MODEAUTO", "MODERAUM", "MODEAUSSEN", "GASDAY", "GASTOTAL", "BETRIEBSART", "BETRIEBAUTO", "BETRIEBBOILER", "BETRIEBHEIZUNG", "BETRIEBAUS", "RAUMTAG", "RAUMNACHT", "TAGZEIT", "NACHTZEIT"
+    "KACHELOFENEIN", "KACHELOFENAUS", "WIFISSID", "WIFIRSSI", "BRENNERSPERRE", "WEBTIME", "MODEAUTO", "MODERAUM", "MODEAUSSEN", "GASDAY", "GASTOTAL", "BETRIEBSART", "BETRIEBAUTO", "BETRIEBBOILER", "BETRIEBHEIZUNG", "BETRIEBAUS", "RAUMTAG", "RAUMNACHT", "RAUMURLAUB", "BETRIEBURLAUB", "TAGZEIT", "NACHTZEIT"
   };
   for (const char* name : placeholders) {
     page.replace(String("%") + name + "%", processor(String(name)));
@@ -255,6 +258,17 @@ void setup() {
         dayMinutes >= nightMinutes)) {
       request->send(400, "text/plain; charset=utf-8", "Ungueltige Zeiten: HH:MM, Tagbeginn muss vor Nachtbeginn liegen"); return;
     }
+    const bool hasVacation = request->hasParam("urlaub", true);
+    float vacation = 0;
+    if (hasVacation) {
+      const String text = request->getParam("urlaub", true)->value();
+      char* end = nullptr;
+      vacation = strtof(text.c_str(), &end);
+      if (text.length() > 16 || end == text.c_str() || *end != '\0' ||
+          !isfinite(vacation) || vacation < 5 || vacation > 40) {
+        request->send(400, "text/plain; charset=utf-8", "Ungueltige Urlaubstemperatur (5 bis 40 Grad)"); return;
+      }
+    }
     uint32_t id = 0;
     portENTER_CRITICAL(&roomSetpointMux);
     if (!requestedRoomSetpoints.pending) {
@@ -264,7 +278,7 @@ void setup() {
       if (result.state != 1) {
         nextRoomSaveId = id = candidate;
         result = {id, 1};
-        requestedRoomSetpoints = {true, day, night, id, hasSchedule, dayMinutes, nightMinutes};
+        requestedRoomSetpoints = {true, day, night, id, hasSchedule, dayMinutes, nightMinutes, hasVacation, vacation};
       }
     }
     portEXIT_CRITICAL(&roomSetpointMux);
@@ -308,7 +322,7 @@ void setup() {
       request->send(400, "text/plain", "Betriebsart fehlt"); return;
     }
     const String value = request->getParam("modus", true)->value();
-    const int mode = value == "auto" ? 0 : value == "boiler" ? 1 : value == "heizung" ? 2 : value == "aus" ? 3 : -1;
+    const int mode = value == "auto" ? 0 : value == "boiler" ? 1 : value == "heizung" ? 2 : value == "aus" ? 3 : value == "urlaub" ? 4 : -1;
     if (mode < 0) { request->send(400, "text/plain", "Ungueltige Betriebsart"); return; }
     portENTER_CRITICAL(&operatingModeMux);
     requestedOperatingMode = mode;

@@ -124,6 +124,8 @@ void mqttupdate() {
     default: break;
   }
   doc["atRegelung"].set(mqttRegelungsArt);
+  doc["urlaubAktiv"] = UrlaubBetrieb != 0;
+  doc["urlaubTemperatur"] = tRoomUrlaub;
   doc["PumpenNachlauf"].set(PumpenNachlauf);
   doc["tvmax"].set(tvmax);
   doc["taumin"].set(taumin);

@@ -109,6 +109,30 @@ in FHEM:   set MQTT_SERVER publish /SmartHome/Keller/Heizung/setRaumTemp up
         strcpy(mqtt_payload,"h_party");
         return;
     }
+    if (strcmp(new_payload, "seturlaub") == 0) {
+      strcpy(mqtt_payload, applyOperatingMode(4) ? "h_urlaub" : "h_save_error");
+      return;
+    }
+    const char vacationPrefix[] = "urlaubTemp:";
+    if (strncmp(new_payload, vacationPrefix, sizeof(vacationPrefix)-1) == 0) {
+      const char* numeric = new_payload + sizeof(vacationPrefix)-1;
+      char* end = nullptr;
+      const float temperature = strtof(numeric, &end);
+      if (end == numeric || *end != '\0' || !isfinite(temperature) ||
+          temperature < 5.0f || temperature > 40.0f) {
+        strcpy(mqtt_payload, "h_urlaubtemp_invalid");
+        return;
+      }
+      EEPROM.put(EEADDRESS_URLAUB_TEMP, temperature);
+      if (EEPROM.commit()) {
+        tRoomUrlaub = temperature;
+        strcpy(mqtt_payload, "h_urlaubtemp");
+      } else {
+        EEPROM.put(EEADDRESS_URLAUB_TEMP, tRoomUrlaub);
+        strcpy(mqtt_payload, "h_save_error");
+      }
+      return;
+    }
     if(strcmp(new_payload,"setoff")==0){
         BoilerBetrieb=0;
         NurHeizung=0;
@@ -116,6 +140,8 @@ in FHEM:   set MQTT_SERVER publish /SmartHome/Keller/Heizung/setRaumTemp up
         EEPROM.put( EEADDRESS_BOILER_SOMMERBETRIEB, BoilerBetrieb );
         EEPROM.put( EEADDRESS_NUR_HEIZUNG, NurHeizung );
         EEPROM.put( EEADDRESS_WINTER, WinterBetrieb );
+        leaveVacationMode();
+        EEPROM.commit();
         strcpy(mqtt_payload,"h_aus");
         return;
     }
@@ -126,6 +152,8 @@ in FHEM:   set MQTT_SERVER publish /SmartHome/Keller/Heizung/setRaumTemp up
         EEPROM.put( EEADDRESS_BOILER_SOMMERBETRIEB, BoilerBetrieb );
         EEPROM.put( EEADDRESS_NUR_HEIZUNG, NurHeizung );
         EEPROM.put( EEADDRESS_WINTER, WinterBetrieb );
+        leaveVacationMode();
+        EEPROM.commit();
         strcpy(mqtt_payload,"h_ein");
         return;
     }
@@ -137,6 +165,8 @@ in FHEM:   set MQTT_SERVER publish /SmartHome/Keller/Heizung/setRaumTemp up
         EEPROM.put( EEADDRESS_BOILER_SOMMERBETRIEB, BoilerBetrieb );
         EEPROM.put( EEADDRESS_NUR_HEIZUNG, NurHeizung );
         EEPROM.put( EEADDRESS_WINTER, WinterBetrieb );
+        leaveVacationMode();
+        EEPROM.commit();
         strcpy(mqtt_payload,"h_boiler");
         return;
     }
@@ -148,6 +178,8 @@ in FHEM:   set MQTT_SERVER publish /SmartHome/Keller/Heizung/setRaumTemp up
         EEPROM.put( EEADDRESS_BOILER_SOMMERBETRIEB, BoilerBetrieb );
         EEPROM.put( EEADDRESS_NUR_HEIZUNG, NurHeizung );
         EEPROM.put( EEADDRESS_WINTER, WinterBetrieb );
+        leaveVacationMode();
+        EEPROM.commit();
         strcpy(mqtt_payload,"h_winter");
         return;
     }
@@ -159,6 +191,8 @@ in FHEM:   set MQTT_SERVER publish /SmartHome/Keller/Heizung/setRaumTemp up
         EEPROM.put( EEADDRESS_BOILER_SOMMERBETRIEB, BoilerBetrieb );
         EEPROM.put( EEADDRESS_NUR_HEIZUNG, NurHeizung );
         EEPROM.put( EEADDRESS_WINTER, WinterBetrieb );
+        leaveVacationMode();
+        EEPROM.commit();
         strcpy(mqtt_payload,"h_heizung");
         return;
     }

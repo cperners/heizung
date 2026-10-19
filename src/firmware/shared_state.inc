@@ -83,6 +83,8 @@ float vorlaufTemperatur; // errechnete vorlaufTemperatur für Regelung
 bool heizkurveGueltig = false;
 float tmyRoomdest;//Zieltemperature je nach Tageszeit
 byte WinterBetrieb,BoilerBetrieb,NurHeizung;
+byte UrlaubBetrieb = 0;
+float tRoomUrlaub = URLAUB_DEFAULT_TEMP;
 int AussentemperaturRegelung,AussentemperaturRegelungAlt = 0;
 byte Pumpenloesen = 0;
 byte PumpenNachlauf = 0;
@@ -119,7 +121,7 @@ portMUX_TYPE webSettingsMux = portMUX_INITIALIZER_UNLOCKED;
 struct KachelofenThresholdRequest { bool pending; float ein; float aus; };
 KachelofenThresholdRequest requestedKachelofenThresholds = {};
 int requestedOperatingMode = -1;
-struct RoomSetpointRequest { bool pending; float day; float night; uint32_t id; bool hasSchedule; uint16_t dayMinutes; uint16_t nightMinutes; };
+struct RoomSetpointRequest { bool pending; float day; float night; uint32_t id; bool hasSchedule; uint16_t dayMinutes; uint16_t nightMinutes; bool hasVacation; float vacation; };
 struct RoomSaveResult { uint32_t id; byte state; };
 RoomSaveResult roomSaveResults[8] = {};
 uint32_t nextRoomSaveId = 0;
@@ -416,6 +418,7 @@ void print_Uptime();
 void Automatik();
 void Boilerbetrieb();
 void Heizungsbetrieb();
+void Urlaubsbetrieb();
 void RoomAnforderungf();
 void updateKachelofenStatus();
 void BoilerAnforderungf();

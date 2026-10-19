@@ -35,8 +35,10 @@ void refreshWebStatus() {
   const unsigned long now = millis();
   if (generation != 0 && now-lastRefresh < 1000UL) return;
   lastRefresh = now;
-  JsonDocument doc;
+  static JsonDocument doc;
+  if (doc.overflowed()) doc.clear();
   addRuntimeDiagnostics(doc);
+  addOtaDiagnostics(doc);
   doc["generation"] = ++generation;
   JsonObject values = doc["values"].to<JsonObject>();
   values["troom"] = readTemperature(tRoom);
@@ -63,6 +65,7 @@ void refreshWebStatus() {
            static_cast<unsigned>(uptimeSeconds % 60ULL));
   values["uptime"] = uptimeText;
   values["cpu-load"] = cpuLoadDisplay();
+  values["ota-status"] = otaDiagnosticDisplay();
   values["wifi-ssid"] = ssid;
   values["wifi-rssi"] = String(WiFi.RSSI());
   values["brennersperre"] = sensorIsUsable(0) ? "Kesselsensor OK - keine Sensorsperre" : "BRENNER GESPERRT - Kesselsensor ungueltig";

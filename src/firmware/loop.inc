@@ -5,6 +5,7 @@ void loop(){
     ntpProbeStarted = xTaskCreate(ntpProbeTask, "ntp-probe", 4096, nullptr, 1, nullptr) == pdPASS;
   }
   ElegantOTA.loop();
+  updateOtaDiagnostics();
   processMqttMessages();
   processGasReading();
   portENTER_CRITICAL(&operatingModeMux);

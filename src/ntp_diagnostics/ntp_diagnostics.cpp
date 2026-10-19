@@ -69,6 +69,7 @@ String ntpProbeDisplay() {
   NtpProbeResult snapshot[3];
   portENTER_CRITICAL(&ntpProbeMux); memcpy(snapshot, ntpProbeResults, sizeof(snapshot)); portEXIT_CRITICAL(&ntpProbeMux);
   String text;
+  text.reserve(512);
   for (int i=0; i<3; ++i) {
     text += ntpProbeServers[i]; text += ": ";
     if (snapshot[i].state == 2) {

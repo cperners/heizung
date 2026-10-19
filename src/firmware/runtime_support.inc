@@ -259,7 +259,10 @@ constexpr unsigned MQTT_QUEUE_LENGTH = 8;
 QueueHandle_t mqttMessageQueue = nullptr;
 
 
+bool operatingModeStorageVerified = false;
+
 void leaveVacationMode() {
+  operatingModeStorageVerified = false;
   UrlaubBetrieb = 0;
   EEPROM.put(EEADDRESS_URLAUB_AKTIV, UrlaubBetrieb);
 }
@@ -271,6 +274,12 @@ bool applyOperatingMode(int operatingMode) {
     const byte boiler = operatingMode == 1;
     const byte heating = operatingMode == 2 || operatingMode == 4;
     const byte vacation = operatingMode == 4;
+    const char modeCode = vacation ? 'U' : winter ? 'A' : boiler ? 'B' : heating ? 'H' : '0';
+    if (operatingModeStorageVerified && WinterBetrieb == winter && BoilerBetrieb == boiler && NurHeizung == heating &&
+        UrlaubBetrieb == vacation) {
+      Betriebsart = modeCode;
+      return true; // An already active mode needs no new flash write.
+    }
     EEPROM.put(EEADDRESS_WINTER, winter);
     EEPROM.put(EEADDRESS_BOILER_SOMMERBETRIEB, boiler);
     EEPROM.put(EEADDRESS_NUR_HEIZUNG, heating);
@@ -278,7 +287,8 @@ bool applyOperatingMode(int operatingMode) {
     if (EEPROM.commit()) {
       WinterBetrieb = winter; BoilerBetrieb = boiler; NurHeizung = heating;
       UrlaubBetrieb = vacation;
-      Betriebsart = vacation ? 'U' : winter ? 'A' : boiler ? 'B' : heating ? 'H' : '0';
+      Betriebsart = modeCode;
+      operatingModeStorageVerified = true;
       return true;
     } else {
       EEPROM.put(EEADDRESS_WINTER, WinterBetrieb);

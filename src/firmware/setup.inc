@@ -211,17 +211,7 @@ void setup() {
   initWebSocket();
   // Route for root / web page
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-  String page = FPSTR(index_html);
-  const char* placeholders[] = {
-    "TimeString", "MQTTUPDATE", "HEIZUNGSPUMPE", "BOILERPUMPE",
-    "TROOM", "TAUSSEN", "TKESSEL", "TVORLAUF", "TBOILER",
-    "TKACHELOFEN", "KACHELOFENSTATUS", "REGELUNGSART",
-    "KACHELOFENEIN", "KACHELOFENAUS", "WIFISSID", "WIFIRSSI", "BRENNERSPERRE", "WEBTIME", "MODEAUTO", "MODERAUM", "MODEAUSSEN", "GASDAY", "GASTOTAL", "BETRIEBSART", "BETRIEBAUTO", "BETRIEBBOILER", "BETRIEBHEIZUNG", "BETRIEBAUS", "RAUMTAG", "RAUMNACHT", "RAUMURLAUB", "BETRIEBURLAUB", "TAGZEIT", "NACHTZEIT"
-  };
-  for (const char* name : placeholders) {
-    page.replace(String("%") + name + "%", processor(String(name)));
-  }
-  request->send(200, "text/html; charset=utf-8", page);
+  request->send(new HeatingPageResponse());
 });
   server.on("/webstatus", HTTP_GET, [](AsyncWebServerRequest *request){
     char buffer[WEB_STATUS_CAPACITY];
@@ -385,6 +375,16 @@ void setup() {
     request->redirect("/");
   });
   // Start ElegantOTA
+  initializeOtaDiagnostics();
+  server.on("/ota-status", HTTP_GET, [](AsyncWebServerRequest* request) {
+    JsonDocument doc;
+    addOtaDiagnostics(doc);
+    String body;
+    serializeJson(doc, body);
+    auto* response = request->beginResponse(200, "application/json", body);
+    response->addHeader("Cache-Control", "no-store");
+    request->send(response);
+  });
   ElegantOTA.begin(&server);
   server.begin();
   esp_task_wdt_reset(); //watchdog Zeit rücksetzen

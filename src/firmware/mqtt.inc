@@ -109,9 +109,16 @@ in FHEM:   set MQTT_SERVER publish /SmartHome/Keller/Heizung/setRaumTemp up
         strcpy(mqtt_payload,"h_party");
         return;
     }
-    if (strcmp(new_payload, "seturlaub") == 0) {
-      strcpy(mqtt_payload, applyOperatingMode(4) ? "h_urlaub" : "h_save_error");
-      return;
+    const struct { const char* command; int mode; const char* answer; } modeCommands[] = {
+      {"setoff", 3, "h_aus"}, {"seton", 0, "h_ein"},
+      {"setboiler", 1, "h_boiler"}, {"setwinter", 0, "h_winter"},
+      {"setheizung", 2, "h_heizung"}, {"seturlaub", 4, "h_urlaub"}
+    };
+    for (const auto& command : modeCommands) {
+      if (strcmp(new_payload, command.command) == 0) {
+        strcpy(mqtt_payload, applyOperatingMode(command.mode) ? command.answer : "h_save_error");
+        return;
+      }
     }
     const char vacationPrefix[] = "urlaubTemp:";
     if (strncmp(new_payload, vacationPrefix, sizeof(vacationPrefix)-1) == 0) {
@@ -132,69 +139,6 @@ in FHEM:   set MQTT_SERVER publish /SmartHome/Keller/Heizung/setRaumTemp up
         strcpy(mqtt_payload, "h_save_error");
       }
       return;
-    }
-    if(strcmp(new_payload,"setoff")==0){
-        BoilerBetrieb=0;
-        NurHeizung=0;
-        WinterBetrieb=0;
-        EEPROM.put( EEADDRESS_BOILER_SOMMERBETRIEB, BoilerBetrieb );
-        EEPROM.put( EEADDRESS_NUR_HEIZUNG, NurHeizung );
-        EEPROM.put( EEADDRESS_WINTER, WinterBetrieb );
-        leaveVacationMode();
-        EEPROM.commit();
-        strcpy(mqtt_payload,"h_aus");
-        return;
-    }
-    if(strcmp(new_payload,"seton")==0){
-        BoilerBetrieb=0;
-        NurHeizung=0;
-        WinterBetrieb=1;
-        EEPROM.put( EEADDRESS_BOILER_SOMMERBETRIEB, BoilerBetrieb );
-        EEPROM.put( EEADDRESS_NUR_HEIZUNG, NurHeizung );
-        EEPROM.put( EEADDRESS_WINTER, WinterBetrieb );
-        leaveVacationMode();
-        EEPROM.commit();
-        strcpy(mqtt_payload,"h_ein");
-        return;
-    }
-    if(strcmp(new_payload,"setboiler")==0){
-        Betriebsart='B';
-        WinterBetrieb=0;
-        BoilerBetrieb=1;
-        NurHeizung=0;
-        EEPROM.put( EEADDRESS_BOILER_SOMMERBETRIEB, BoilerBetrieb );
-        EEPROM.put( EEADDRESS_NUR_HEIZUNG, NurHeizung );
-        EEPROM.put( EEADDRESS_WINTER, WinterBetrieb );
-        leaveVacationMode();
-        EEPROM.commit();
-        strcpy(mqtt_payload,"h_boiler");
-        return;
-    }
-    if(strcmp(new_payload,"setwinter")==0){
-        Betriebsart='A';
-        WinterBetrieb=1;
-        BoilerBetrieb=0;
-        NurHeizung=0;
-        EEPROM.put( EEADDRESS_BOILER_SOMMERBETRIEB, BoilerBetrieb );
-        EEPROM.put( EEADDRESS_NUR_HEIZUNG, NurHeizung );
-        EEPROM.put( EEADDRESS_WINTER, WinterBetrieb );
-        leaveVacationMode();
-        EEPROM.commit();
-        strcpy(mqtt_payload,"h_winter");
-        return;
-    }
-    if(strcmp(new_payload,"setheizung")==0){
-        Betriebsart='H';
-        WinterBetrieb=0;
-        BoilerBetrieb=0;
-        NurHeizung=1;
-        EEPROM.put( EEADDRESS_BOILER_SOMMERBETRIEB, BoilerBetrieb );
-        EEPROM.put( EEADDRESS_NUR_HEIZUNG, NurHeizung );
-        EEPROM.put( EEADDRESS_WINTER, WinterBetrieb );
-        leaveVacationMode();
-        EEPROM.commit();
-        strcpy(mqtt_payload,"h_heizung");
-        return;
     }
     if(strcmp(new_payload,"ntpupdate")==0){
         ntpupdate();

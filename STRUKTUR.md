@@ -22,6 +22,8 @@ Diese `.cpp`-Dateien kompiliert PlatformIO eigenständig. Die `.h`-Dateien besch
 | `setup.inc` | Initialisierung, Webrouten und Start der Dienste |
 | `loop.inc` | Hauptschleife, Auftragsübernahme und zyklische Verarbeitung |
 | `web_status.inc` | Gemeinsamer Status-Snapshot für die Webseite |
+| `web_page_response.inc` | Abschnittsweise HTML-Ausgabe mit festen Platzhalterwerten |
+| `ota_diagnostics.inc` | Beobachtung von OTA-Start, Fortschritt, Fehlern und Abschluss |
 | `web_handlers.inc` | WebSocket-Handler, Platzhalter und Anzeigeformatierung |
 | `network.inc` | WLAN-Ereignisse, Verbindung und MQTT-Statusversand |
 | `mqtt.inc` | MQTT-Empfang, Warteschlange und Befehlsverarbeitung |
@@ -75,3 +77,14 @@ Die Urlaubstemperatur ist im Webformular für Wunschtemperaturen in 0,1-Grad-Sch
 Die Antwort kommt im bestehenden JSON-Feld `answer` im nächsten Statusversand. Status enthält außerdem `urlaubAktiv`, `urlaubTemperatur` und Betriebsartkennung `U`. Der ausgewählte Regelungsmodus in `atRegelung` bleibt die normale Auswahl; während Urlaub ist die wirksame Regelung unabhängig davon Raumregelung.
 
 WLAN-SSID und RSSI sind in einer gemeinsamen Kachel, beide werden über den Status-Snapshot aktualisiert. Der bisherige unbeschriftete WLAN-Schieberegler ist entfernt. Build, lokale Abläufe, MQTT-Grenzfälle und JavaScript/Platzhalter wurden geprüft. Ein Gerätetest für Urlaub einschließlich Neustart/Persistenz steht noch aus.
+
+## Optimierungen nach dem Urlaubsbetrieb
+
+- Alle sechs MQTT-Betriebsartenbefehle verwenden nun `applyOperatingMode()`. Bei fehlgeschlagenem Speichern bleiben die bisherigen Laufzeitwerte aktiv und die Antwort lautet `h_save_error`. Wiederholung eines bereits in diesem Lauf erfolgreich gespeicherten Modus vermeidet einen weiteren Flash-Schreibvorgang. Eine MQTT-Antwort wird erst aus dem Puffer entfernt, wenn der Statusversand vom MQTT-Client angenommen wurde; das ist keine Broker-Empfangsbestätigung.
+- `web_page_response.inc` liefert die Hauptseite abschnittsweise mit festgehaltenen Platzhalterwerten aus. `web/template_stream.h` ersetzt ausschließlich bekannte Platzhalter; Prozentzeichen in CSS/JavaScript und Werten bleiben erhalten. Die vollständige HTML-Seite wird nicht mehr für jede Anfrage als großer String aufgebaut und kopiert.
+- Webstatus und MQTT verwenden ihre JSON-Dokumente wieder, statt die Variant-Speicherpools bei jedem Zyklus neu anzulegen. Nach einem Allokationsfehler wird das betroffene Dokument zur Erholung zurückgesetzt. NTP-Text reserviert seinen begrenzten Arbeitsbereich vorab. Dies reduziert Speicherbewegungen, beweist aber noch keine Behebung der nach Tagen beobachteten Webverzögerung.
+- `ota_diagnostics.inc` beobachtet ElegantOTA-Start, Fortschritt und Abschluss. Die Hauptschleife ergänzt Fehlercodes und erkennt ausbleibenden Fortschritt nach 30 Sekunden. Es werden keine laufenden Updates automatisch abgebrochen und keine Relais verändert. Ein bereits offener Vorgang wird als solcher gemeldet. Die sporadischen OTA-Abbrüche sind weiterhin nicht abschließend erklärt.
+
+OTA-Diagnosen erscheinen in der Systemdiagnose, im MQTT-Objekt `ota` und über den lesenden Endpunkt `/ota-status`. `bytesWritten` zählt Firmwarebytes, `httpContentLength` die Multipart-HTTP-Länge einschließlich Verwaltungsdaten; beide Werte müssen daher nicht gleich sein. Die Beobachtung beginnt nach Installation dieser Version und wird beim Neustart zurückgesetzt. Ein erfolgreicher Abschluss kann durch den anschließenden Neustart nur kurz sichtbar sein.
+
+Prüfungen: kompletter Firmware-Build; echte MQTT-Modusfunktionen mit erfolgreichen/fehlerhaften Speichertransaktionen und Wiederholungen; komplette HTML-Ausgabe bei Puffergrößen von 1 bis 1460 Bytes einschließlich Prozentzeichen/Leerwerten; OTA-Callbacks einschließlich fehlendem Fortschritt und erneutem Start; JSON-Speicherwiederverwendung über 10000 Zyklen; JavaScript-Syntax. Der Betrieb dieser Optimierungen am Gerät und der Langzeitvergleich stehen aus. Nach dem Update neue Speicher-Ausgangswerte festhalten, weil die dauerhaft behaltenen JSON-Pools den freien Heap gegenüber der Vorversion verändern können.

@@ -249,6 +249,7 @@ function adjustThreshold(id, direction) {
     <p>Schleifenabstand, zuletzt max.: <span id="loop-recent">--</span><br>
     Maximum seit Start: <span id="loop-max">--</span><br>
     Abst&auml;nde &uuml;ber 100 ms: <span id="loop-slow">--</span></p>
+    <p>OTA: <span id="ota-status">Noch keine Diagnose</span></p>
     <small>Abstand zwischen zwei Schleifenstarts inklusive Wartezeiten; keine reine CPU-Rechenzeit. Historische Maxima bleiben bis zum Neustart erhalten.</small>
   </div>
   </section>
@@ -302,7 +303,7 @@ function showTemperatureTrend(key, direction) {
   arrow.className = 'temperature-trend' + (direction === 1 ? ' up' : direction === -1 ? ' down' : '');
   arrow.title = label; arrow.setAttribute('aria-label', label);
 }
-var statusTextKeys = ['troom','taussen','tkessel','tvorlauf','tboiler','tkachelofen','header-clock','brennersperre','regelungsart','betriebsart','gas-day','gas-total','ntp-abweichung','kachelofen-status','uptime','cpu-load','wifi-ssid','wifi-rssi'];
+var statusTextKeys = ['troom','taussen','tkessel','tvorlauf','tboiler','tkachelofen','header-clock','brennersperre','regelungsart','betriebsart','gas-day','gas-total','ntp-abweichung','kachelofen-status','uptime','cpu-load','wifi-ssid','wifi-rssi','ota-status'];
 var sharedStatusPending = false;
 var diagnosticKeys = ['heap-free','heap-min','heap-largest','loop-recent','loop-max','loop-slow'];
 function showDiagnostics(health) {

@@ -84,8 +84,10 @@ void mqttupdate() {
   char msg[50];
   char line0[48];
   char buffer[2048];
-  JsonDocument doc;
+  static JsonDocument doc;
+  if (doc.overflowed()) doc.clear();
   addRuntimeDiagnostics(doc);
+  addOtaDiagnostics(doc);
   doc["S0Kessel"].set(tKessel);
   doc["S1Vorlauf"].set(tVorlauf);
   doc["S2Aussen"].set(tAussen);
@@ -135,7 +137,6 @@ void mqttupdate() {
   }
     else{
     snprintf(line0, sizeof(line0), "%s", mqtt_payload);
-    strcpy(mqtt_payload,"");
     doc["answer"].set(line0);
   }
   snprintf(line0, sizeof(line0), "%c" ,Betriebsart);
@@ -149,6 +150,7 @@ void mqttupdate() {
   bez = bez + MQTT_TEXT + "JDATA";
   bez.toCharArray(msg,50);
   const uint16_t jsonPacketId = asyncMqttClient.publish(msg, 1, true, buffer, payloadSize);
+  if (jsonPacketId) mqtt_payload[0] = '\0';
   Serial.printf("MQTT JSON: %u Bytes, Versand %s\n", static_cast<unsigned>(payloadSize),
                 jsonPacketId ? "eingereiht" : "abgelehnt");
 }

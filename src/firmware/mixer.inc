@@ -128,8 +128,76 @@ bool enforceVorlaufSensorLock() {
   return true;
 }
 
+bool mischerBoilerMode = false;
+bool mischerBoilerFinished = false;
+unsigned long mischerBoilerStarted = 0;
+unsigned long mischerBoilerCheckStarted = 0;
+bool mischerBoilerCheckDone = false;
+bool mischerBoilerReferenceValid = false;
+float mischerBoilerReference = 0;
+static_assert(MISCHER_BOILER_NACHPRUEFUNG_MINUTEN <= 0xFFFFFFFFUL / 60000UL,
+              "Mischer-Boiler-Nachpruefzeit ist zu gross");
+constexpr unsigned long MISCHER_BOILER_CHECK_MS = MISCHER_BOILER_NACHPRUEFUNG_MINUTEN * 60000UL;
+static_assert(MISCHER_BOILER_ZUFAHRT_MINUTEN <= 0xFFFFFFFFUL / 60000UL,
+              "Mischer-Boiler-Zeit ist zu gross");
+constexpr unsigned long MISCHER_BOILER_CLOSE_MS = MISCHER_BOILER_ZUFAHRT_MINUTEN * 60000UL;
+
+void updateMischerBoilerMode() {
+  const bool boilerOnly = !UrlaubBetrieb && !WinterBetrieb && BoilerBetrieb;
+  if (!boilerOnly) {
+    if (mischerBoilerMode) {
+      // AUS already owns its outputs after updateMischerOffMode.
+      if (!mischerOffMode) MischerStop();
+      mischerBoilerMode = false;
+    }
+    return;
+  }
+  if (!mischerBoilerMode) {
+    mischerBoilerMode = true;
+    mischerBoilerStarted = millis();
+    mischerBoilerFinished = false;
+    mischerBoilerCheckDone = false;
+    mischerBoilerReferenceValid = false;
+    mischer_wait = mischer_drive = 0;
+    mischer_init_laeuft = mischer_init_auf = mischer_init_zu = false;
+    previousTime_MischerInit = 0;
+    Serial.println("NUR BOILER: einmalige Mischer-Schliessfahrt");
+  }
+  // Existing sensor-fault opening/lock takes priority over this movement.
+  if (enforceVorlaufSensorLock()) {
+    mischerBoilerReferenceValid = false;
+    return;
+  }
+  const unsigned long now = millis();
+  const bool valid = sensorIsUsable(1) && isfinite(tVorlauf);
+  if (!mischerBoilerFinished && (unsigned long)(now - mischerBoilerStarted) >= MISCHER_BOILER_CLOSE_MS) {
+    mischerBoilerFinished = true;
+    if (!mischerBoilerCheckDone) {
+      // Compare against the temperature at the end of the first closing run.
+      mischerBoilerCheckStarted = now;
+      mischerBoilerReferenceValid = valid;
+      mischerBoilerReference = tVorlauf;
+    }
+  }
+  if (mischerBoilerFinished && !mischerBoilerCheckDone &&
+      (unsigned long)(now - mischerBoilerCheckStarted) >= MISCHER_BOILER_CHECK_MS) {
+    mischerBoilerCheckDone = true;
+    if (mischerBoilerReferenceValid && valid && tVorlauf >= mischerBoilerReference) {
+      mischerBoilerFinished = false;
+      mischerBoilerStarted = now;
+      Serial.println("NUR BOILER: Vorlauf nicht gesunken, einmalige Mischer-Nachfahrt");
+    }
+  }
+  if (!mischerBoilerFinished) {
+    MischerZu();
+  } else {
+    MischerStop();
+  }
+}
+
 void MischerInit(){
   if (enforceVorlaufSensorLock()) return;
+  if (mischerBoilerMode) return;
   unsigned long currentTime0;
   if(!mischer_init_auf && !mischer_init_laeuft && !mischer_init_zu){
    mischer_init_laeuft=true;

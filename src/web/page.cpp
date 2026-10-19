@@ -66,6 +66,18 @@ form { line-height: 2; font-size: .9rem; }
 .output-led.on {background:#16a34a;box-shadow:0 0 6px #16a34a66;}
 .output-led.off {background:#dc2626;}
 .output-indicator {display:flex;align-items:center;gap:8px;}
+#boiler-delta { color: #607681; font-weight: 600; }
+#boiler-delta.warmer { color: #d98888; }
+#boiler-delta.cooler { color: #7a9ecb; }
+#burner-flame { width: 28px; height: 32px; color: #929ba1; vertical-align: middle; margin-right: 6px; }
+#burner-flame.on { color: #d98888; }
+#heating-pump-icon, #boiler-pump-icon { width: 30px; height: 30px; color: #929ba1; vertical-align: middle; margin-right: 6px; }
+#heating-pump-icon.on, #boiler-pump-icon.on { color: #69a886; }
+.temperature-line { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.equipment-status { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+#mixer-symbol { width: 32px; height: 32px; color: #929ba1; vertical-align: middle; }
+#mixer-symbol.moving { color: #69a886; }
+.mixer-status { font-size: .9rem; color: #607681; }
 </style>
 <title>ESP32 Heizungs-Server</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -79,49 +91,90 @@ form { line-height: 2; font-size: .9rem; }
   </div>
   <section class="layout">
   <div>
-    <i class="fas fa-thermometer-half" style="color:#059e8a;"></i> 
     <span class="dht-labels">K&uuml;che</span> 
+    <div class="temperature-line">
+    <svg viewBox="0 0 16 24" width="16" height="24" style="color:#059e8a;vertical-align:middle;margin-right:5px" role="img" aria-label="Temperatur"><path d="M5 14.5V5a3 3 0 0 1 6 0v9.5a5 5 0 1 1-6 0Z" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M8 7v10" stroke="currentColor" stroke-width="2"/><circle cx="8" cy="18" r="2.5" fill="currentColor"/></svg>
     <span id="troom">%TROOM%</span>
     <sup class="units">&deg;C</sup>
+    </div>
   </div>
   <div>
-    <i class="fas fa-thermometer-half" style="color:#059e8a;"></i> 
     <span class="dht-labels">Aussen</span> 
+    <div class="temperature-line">
+    <svg viewBox="0 0 16 24" width="16" height="24" style="color:#059e8a;vertical-align:middle;margin-right:5px" role="img" aria-label="Temperatur"><path d="M5 14.5V5a3 3 0 0 1 6 0v9.5a5 5 0 1 1-6 0Z" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M8 7v10" stroke="currentColor" stroke-width="2"/><circle cx="8" cy="18" r="2.5" fill="currentColor"/></svg>
     <span id="taussen">%TAUSSEN%</span>
     <sup class="units">&deg;C</sup>
+    </div>
   </div>
   <div>
-    <i class="fas fa-thermometer-half" style="color:#059e8a;"></i> 
     <span class="dht-labels">Gaskessel</span> 
+    <div class="temperature-line">
+    <svg viewBox="0 0 16 24" width="16" height="24" style="color:#059e8a;vertical-align:middle;margin-right:5px" role="img" aria-label="Temperatur"><path d="M5 14.5V5a3 3 0 0 1 6 0v9.5a5 5 0 1 1-6 0Z" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M8 7v10" stroke="currentColor" stroke-width="2"/><circle cx="8" cy="18" r="2.5" fill="currentColor"/></svg>
     <span id="tkessel">%TKESSEL%</span>
-    <div id="brennersperre" role="status">%BRENNERSPERRE%</div>
     <sup class="units">&deg;C</sup>
+    </div>
+    <div class="equipment-status"><svg id="burner-flame" viewBox="0 0 24 24" role="img" aria-label="Brennerstatus wird geladen"><title>Brennerstatus wird geladen</title><path fill="currentColor" d="M13.5 1.5c.5 5-3.5 5.5-3.5 9 0 1 .5 1.8 1.2 2.3-.2-2.3 1.5-3.3 2.3-4.8 3 2.2 5 5 5 7.8a6.5 6.5 0 0 1-13 0c0-3.5 2-6.4 4.5-9-.2 2.5.4 3.5.4 3.5C10 6.5 14 5 13.5 1.5Z"/></svg><svg id="heating-pump-icon" viewBox="0 0 24 24" role="img" aria-label="Heizungspumpenstatus wird geladen"><title>Heizungspumpenstatus wird geladen</title><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M2 10h4m12 4h4M2 8v4m20 0v4M8 19l-1 3h10l-1-3"/><circle cx="12" cy="12" r="7"/></g><path fill="currentColor" d="M10 8l6 4-6 4Z"/></svg></div>
+    <div id="brennersperre" role="status">%BRENNERSPERRE%</div>
   </div>
   <div>
-    <i class="fas fa-thermometer-half" style="color:#059e8a;"></i> 
     <span class="dht-labels">Vorlauf</span> 
+    <div class="temperature-line">
+    <svg viewBox="0 0 16 24" width="16" height="24" style="color:#059e8a;vertical-align:middle;margin-right:5px" role="img" aria-label="Temperatur"><path d="M5 14.5V5a3 3 0 0 1 6 0v9.5a5 5 0 1 1-6 0Z" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M8 7v10" stroke="currentColor" stroke-width="2"/><circle cx="8" cy="18" r="2.5" fill="currentColor"/></svg>
     <span id="tvorlauf">%TVORLAUF%</span>
     <sup class="units">&deg;C</sup>
+    </div>
+    <div class="equipment-status mixer-status">
+      <svg id="mixer-symbol" viewBox="0 0 32 32" role="img" aria-label="Mischerstatus wird geladen"><title>Mischerstatus wird geladen</title><g fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M2 13h7m14 0h7M16 20v10M1 9v8m30-8v8M12 31h8"/><path d="m9 7 14 12V7L9 19ZM16 13v7M16 7V2m-5 0h10"/></g></svg>
+      <span id="mixer-direction">Wird geladen</span>
+    </div>
+    <form id="flow-limit" class="threshold-form" action="/vorlaufmaximum" method="post">
+      <label for="flow-max">Maximale Vorlauftemperatur</label>
+      <div class="threshold-row">
+        <button type="button" aria-label="Maximale Vorlauftemperatur senken" onclick="document.getElementById('flow-max').stepDown()">&minus;</button>
+        <div class="threshold-value"><input id="flow-max" name="maximum" type="number" min="0" max="100" step="0.1" value="%VORLAUFMAX%" readonly required><span>&deg;C</span></div>
+        <button type="button" aria-label="Maximale Vorlauftemperatur erh&ouml;hen" onclick="document.getElementById('flow-max').stepUp()">+</button>
+      </div>
+      <small>Begrenzt den Sollwert bei Au&szlig;entemperaturregelung.</small>
+      <label for="flow-curve">Kurvensteilheit</label>
+      <div class="threshold-row">
+        <button type="button" aria-label="Kurvensteilheit senken" onclick="document.getElementById('flow-curve').stepDown()">&minus;</button>
+        <div class="threshold-value"><input id="flow-curve" name="steilheit" type="number" min="0.1" max="10" step="0.1" value="%KURVENSTEILHEIT%" readonly required></div>
+        <button type="button" aria-label="Kurvensteilheit erh&ouml;hen" onclick="document.getElementById('flow-curve').stepUp()">+</button>
+      </div>
+      <p id="flow-save-status" class="threshold-hint" role="status">&Auml;nderungen erst mit Speichern &uuml;bernehmen.</p>
+      <button id="flow-save" class="threshold-save" type="submit">Heizkurveneinstellungen speichern</button>
+    </form>
   </div>
   <div>
-    <i class="fas fa-thermometer-half" style="color:#059e8a;"></i> 
     <span class="dht-labels">Boiler</span> 
+    <div class="temperature-line">
+    <svg viewBox="0 0 16 24" width="16" height="24" style="color:#059e8a;vertical-align:middle;margin-right:5px" role="img" aria-label="Temperatur"><path d="M5 14.5V5a3 3 0 0 1 6 0v9.5a5 5 0 1 1-6 0Z" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M8 7v10" stroke="currentColor" stroke-width="2"/><circle cx="8" cy="18" r="2.5" fill="currentColor"/></svg>
     <span id="tboiler">%TBOILER%</span>
     <sup class="units">&deg;C</sup>
+    </div>
+    <div class="equipment-status"><svg id="boiler-pump-icon" viewBox="0 0 24 24" role="img" aria-label="Boilerpumpenstatus wird geladen"><title>Boilerpumpenstatus wird geladen</title><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M2 10h4m12 4h4M2 8v4m20 0v4M8 19l-1 3h10l-1-3"/><circle cx="12" cy="12" r="7"/></g><path fill="currentColor" d="M10 8l6 4-6 4Z"/></svg></div>
+    <p style="font-size:.9rem;">Differenz Kessel &minus; Boiler: <span id="boiler-delta">%BOILERDELTA%</span></p>
+    <form id="boiler-setpoint" class="threshold-form" action="/boilertemperatur" method="post">
+      <label for="boiler-soll">Boiler-Solltemperatur</label>
+      <div class="threshold-row">
+        <button type="button" aria-label="Boiler-Solltemperatur senken" onclick="document.getElementById('boiler-soll').stepDown()">&minus;</button>
+        <div class="threshold-value"><input id="boiler-soll" name="soll" type="number" min="0" max="100" step="0.1" value="%BOILERSOLL%" readonly required><span>&deg;C</span></div>
+        <button type="button" aria-label="Boiler-Solltemperatur erh&ouml;hen" onclick="document.getElementById('boiler-soll').stepUp()">+</button>
+      </div>
+      <label for="boiler-diff">Einschaltdifferenz</label>
+      <div class="threshold-row">
+        <button type="button" aria-label="Einschaltdifferenz senken" onclick="document.getElementById('boiler-diff').stepDown()">&minus;</button>
+        <div class="threshold-value"><input id="boiler-diff" name="differenz" type="number" min="0" max="100" step="0.1" value="%BOILERDIFF%" readonly required><span>&deg;C</span></div>
+        <button type="button" aria-label="Einschaltdifferenz erh&ouml;hen" onclick="document.getElementById('boiler-diff').stepUp()">+</button>
+      </div>
+      <p id="boiler-save-status" class="threshold-hint" role="status">&Auml;nderungen erst mit Speichern &uuml;bernehmen.</p>
+      <button id="boiler-save" class="threshold-save" type="submit">Boilereinstellungen speichern</button>
+    </form>
+    <p id="boiler-settings" style="font-size:.8rem;color:#607681;">%BOILERINFO%</p>
   </div>
   <p>
   </section>
   <section class="layout">
-  <div><h3>Ausgangsstatus</h3>
-    <div class="output-status">
-      <div class="output-row"><span>Brenner</span><span class="output-indicator"><span id="led-brenner" class="output-led" aria-hidden="true"></span><span id="status-brenner">Wird geladen</span></span></div>
-      <div class="output-row"><span>Boilerpumpe</span><span class="output-indicator"><span id="led-boiler" class="output-led" aria-hidden="true"></span><span id="status-boiler">Wird geladen</span></span></div>
-      <div class="output-row"><span>Heizungspumpe</span><span class="output-indicator"><span id="led-heizung" class="output-led" aria-hidden="true"></span><span id="status-heizung">Wird geladen</span></span></div>
-      <div class="output-row"><span>Mischer auf</span><span class="output-indicator"><span id="led-mischerauf" class="output-led" aria-hidden="true"></span><span id="status-mischerauf">Wird geladen</span></span></div>
-      <div class="output-row"><span>Mischer zu</span><span class="output-indicator"><span id="led-mischerzu" class="output-led" aria-hidden="true"></span><span id="status-mischerzu">Wird geladen</span></span></div>
-    </div>
-    <small>Gr&uuml;n: Ausgang ein &middot; Rot: Ausgang aus</small>
-  </div>
   <div>
     <h3>Gasverbrauch heute</h3>
     <strong id="gas-day">%GASDAY%</strong> m&sup3;
@@ -289,7 +342,48 @@ document.getElementById('room-setpoints').addEventListener('submit', async funct
   } finally { button.disabled = false; }
 });
 
-var outputKeys = ['brenner','boiler','heizung','mischerauf','mischerzu'];
+document.getElementById('boiler-setpoint').addEventListener('submit', async function(event) {
+  event.preventDefault();
+  var button = document.getElementById('boiler-save');
+  var status = document.getElementById('boiler-save-status');
+  button.disabled = true; status.textContent = 'Wird gespeichert...';
+  try {
+    var body = new URLSearchParams(new FormData(event.target)).toString();
+    var accepted = await roomSaveRequest('/boilertemperatur', 'POST', body);
+    var confirmed = false;
+    for (var attempt = 0; attempt < 20; ++attempt) {
+      await new Promise(function(resolve) { setTimeout(resolve, 500); });
+      var result = await roomSaveRequest('/boilertemperatur-status?id='+accepted.id, 'GET');
+      if (result.state === 2) { status.textContent = 'Boilereinstellungen gespeichert.'; confirmed = true; break; }
+      if (result.state === 3) { status.textContent = 'Speichern fehlgeschlagen. Bisheriger Sollwert bleibt aktiv.'; confirmed = true; break; }
+    }
+    if (!confirmed) status.textContent = 'Speichern noch nicht bestätigt. Bitte neu laden und Wert prüfen.';
+  } catch (error) {
+    status.textContent = 'Speichern nicht bestätigt: ' + error.message;
+  } finally { button.disabled = false; }
+});
+
+document.getElementById('flow-limit').addEventListener('submit', async function(event) {
+  event.preventDefault();
+  var button = document.getElementById('flow-save');
+  var status = document.getElementById('flow-save-status');
+  button.disabled = true; status.textContent = 'Wird gespeichert...';
+  try {
+    var body = new URLSearchParams(new FormData(event.target)).toString();
+    var accepted = await roomSaveRequest('/vorlaufmaximum', 'POST', body);
+    var confirmed = false;
+    for (var attempt = 0; attempt < 20; ++attempt) {
+      await new Promise(function(resolve) { setTimeout(resolve, 500); });
+      var result = await roomSaveRequest('/vorlaufmaximum-status?id='+accepted.id, 'GET');
+      if (result.state === 2) { status.textContent = 'Heizkurveneinstellungen gespeichert.'; confirmed = true; break; }
+      if (result.state === 3) { status.textContent = 'Speichern fehlgeschlagen. Bisheriger Sollwert bleibt aktiv.'; confirmed = true; break; }
+    }
+    if (!confirmed) status.textContent = 'Speichern noch nicht bestätigt. Bitte neu laden und Wert prüfen.';
+  } catch (error) {
+    status.textContent = 'Speichern nicht bestätigt: ' + error.message;
+  } finally { button.disabled = false; }
+});
+
 var temperatureKeys = ['troom','taussen','tkessel','tvorlauf','tboiler','tkachelofen'];
 temperatureKeys.forEach(function(key) {
   var arrow = document.createElement('span');
@@ -303,7 +397,7 @@ function showTemperatureTrend(key, direction) {
   arrow.className = 'temperature-trend' + (direction === 1 ? ' up' : direction === -1 ? ' down' : '');
   arrow.title = label; arrow.setAttribute('aria-label', label);
 }
-var statusTextKeys = ['troom','taussen','tkessel','tvorlauf','tboiler','tkachelofen','header-clock','brennersperre','regelungsart','betriebsart','gas-day','gas-total','ntp-abweichung','kachelofen-status','uptime','cpu-load','wifi-ssid','wifi-rssi','ota-status'];
+var statusTextKeys = ['troom','taussen','tkessel','tvorlauf','tboiler','tkachelofen','header-clock','brennersperre','regelungsart','betriebsart','gas-day','gas-total','ntp-abweichung','kachelofen-status','uptime','cpu-load','wifi-ssid','wifi-rssi','ota-status','boiler-settings','boiler-delta'];
 var sharedStatusPending = false;
 var diagnosticKeys = ['heap-free','heap-min','heap-largest','loop-recent','loop-max','loop-slow'];
 function showDiagnostics(health) {
@@ -321,16 +415,54 @@ function showDiagnostics(health) {
 var lastStatusGeneration = null;
 var lastStatusChange = Date.now();
 function unavailableSharedStatus() {
+  showBurnerFlame(null);
+  showHeatingPump(null);
+  showBoilerPump(null);
+  showMixerStatus(null, null);
   showDiagnostics(null);
   temperatureKeys.forEach(function(key) { showTemperatureTrend(key, null); });
-  outputKeys.forEach(function(key) {
-    document.getElementById('led-'+key).className = 'output-led';
-    document.getElementById('status-'+key).textContent = 'Nicht erreichbar';
-  });
   statusTextKeys.forEach(function(key) {
     document.getElementById(key).textContent = key.charAt(0) === 't' ? '--' : 'Nicht erreichbar';
   });
+  updateBoilerDeltaColor();
 }
+function showMixerStatus(open, close) {
+  var icon = document.getElementById('mixer-symbol');
+  var known = typeof open === 'boolean' && typeof close === 'boolean';
+  var valid = known && !(open && close);
+  var label = !known ? 'Nicht erreichbar' : !valid ? 'Ausgangskonflikt' : open ? '\u2191 Auf' : close ? '\u2193 Zu' : 'Stopp';
+  icon.setAttribute('class', valid && (open || close) ? 'moving' : '');
+  icon.setAttribute('aria-label', 'Mischer: ' + label);
+  icon.querySelector('title').textContent = 'Mischer: ' + label;
+  document.getElementById('mixer-direction').textContent = label;
+}
+function showHeatingPump(active) {
+  var icon = document.getElementById('heating-pump-icon');
+  var label = active === true ? 'Heizungspumpenausgang ein' : active === false ? 'Heizungspumpenausgang aus' : 'Heizungspumpenstatus nicht erreichbar';
+  icon.setAttribute('class', active === true ? 'on' : '');
+  icon.setAttribute('aria-label', label);
+  icon.querySelector('title').textContent = label;
+}
+function showBoilerPump(active) {
+  var icon = document.getElementById('boiler-pump-icon');
+  var label = active === true ? 'Boilerpumpenausgang ein' : active === false ? 'Boilerpumpenausgang aus' : 'Boilerpumpenstatus nicht erreichbar';
+  icon.setAttribute('class', active === true ? 'on' : '');
+  icon.setAttribute('aria-label', label);
+  icon.querySelector('title').textContent = label;
+}
+function showBurnerFlame(active) {
+  var flame = document.getElementById('burner-flame');
+  var label = active === true ? 'Brennerausgang ein' : active === false ? 'Brennerausgang aus' : 'Brennerstatus nicht erreichbar';
+  flame.setAttribute('class', active === true ? 'on' : '');
+  flame.setAttribute('aria-label', label);
+  flame.querySelector('title').textContent = label;
+}
+function updateBoilerDeltaColor() {
+  var element = document.getElementById('boiler-delta');
+  var difference = parseFloat(element.textContent);
+  element.className = Number.isFinite(difference) ? (difference > 0 ? 'warmer' : 'cooler') : '';
+}
+updateBoilerDeltaColor();
 function updateSharedStatus() {
   if (sharedStatusPending) return;
   sharedStatusPending = true;
@@ -348,13 +480,13 @@ function updateSharedStatus() {
       if (lastStatusGeneration !== data.generation) { lastStatusGeneration = data.generation; lastStatusChange = Date.now(); }
       if (Date.now()-lastStatusChange > 6000) { unavailableSharedStatus(); return; }
       statusTextKeys.forEach(function(key) { document.getElementById(key).textContent = data.values[key]; });
+      showBurnerFlame(data.outputs[0] === 1);
+      showHeatingPump(data.outputs[2] === 1);
+      showBoilerPump(data.outputs[1] === 1);
+      showMixerStatus(data.outputs[3] === 1, data.outputs[4] === 1);
+      updateBoilerDeltaColor();
       showDiagnostics(data.diagnostics);
       temperatureKeys.forEach(function(key, index) { showTemperatureTrend(key, data.trends[index]); });
-      outputKeys.forEach(function(key, index) {
-        var active = data.outputs[index] === 1;
-        document.getElementById('led-'+key).className = 'output-led ' + (active ? 'on' : 'off');
-        document.getElementById('status-'+key).textContent = active ? 'Ein' : 'Aus';
-      });
     } catch (error) { unavailableSharedStatus(); }
   };
   request.onerror = request.ontimeout = unavailableSharedStatus;

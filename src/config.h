@@ -21,6 +21,10 @@
 #define MISCHER_DRIVE 5
 // Einmalige Schliessfahrt beim Wechsel auf Betriebsart AUS (auch Start in AUS).
 #define MISCHER_AUS_ZUFAHRT_MINUTEN 2UL
+// Einmalige Schliessfahrt in NUR BOILER, ohne Restwaerme-Wartebedingung.
+#define MISCHER_BOILER_ZUFAHRT_MINUTEN 2UL
+// Nach erster Schliessfahrt einmal pruefen; bei fehlender Abkuehlung einmal nachfahren.
+#define MISCHER_BOILER_NACHPRUEFUNG_MINUTEN 10UL
 // Schliessfahrt in AUS erst bei gueltiger Kesseltemperatur <= diesem Wert.
 #define MISCHER_AUS_KESSEL_MAX_TEMP 30.0f
 #define MISCHER_INIT_TIME_ZU 6000

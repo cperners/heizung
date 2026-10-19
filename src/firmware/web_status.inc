@@ -46,6 +46,8 @@ void refreshWebStatus() {
   values["tkessel"] = readTemperature(tKessel);
   values["tvorlauf"] = readTemperature(tVorlauf);
   values["tboiler"] = readTemperature(tBoiler);
+  values["boiler-settings"] = boilerSettingDisplay();
+  values["boiler-delta"] = boilerTemperatureDifferenceDisplay();
   values["tkachelofen"] = readTemperature(tKachelofen);
   JsonArray trends = doc["trends"].to<JsonArray>();
   addTemperatureTrend(trends, 0, tRoom, sensorLastSuccess[3], sensorIsUsable(3));

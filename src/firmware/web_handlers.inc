@@ -96,6 +96,18 @@ String processor(const String& var){
     return readTemperature(tVorlauf);
   }else if(var == "TBOILER"){
     return readTemperature(tBoiler);
+  }else if(var == "BOILERSOLL"){
+    return String(tBoilerDest, 1);
+  }else if(var == "BOILERDIFF"){
+    return String(tBoilerDiff, 1);
+  }else if(var == "VORLAUFMAX"){
+    return String(tvmax, 1);
+  }else if(var == "KURVENSTEILHEIT"){
+    return String(n, 1);
+  }else if(var == "BOILERDELTA"){
+    return boilerTemperatureDifferenceDisplay();
+  }else if(var == "BOILERINFO"){
+    return boilerSettingDisplay();
   }else if(var == "TAUSSEN"){
     return readTemperature(tAussen);
   }else if(var == "TKACHELOFEN"){

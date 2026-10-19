@@ -276,6 +276,120 @@ void setup() {
     char response[40]; snprintf(response, sizeof(response), "{\"id\":%lu}", static_cast<unsigned long>(id));
     request->send(202, "application/json", response);
   });
+  server.on("/vorlaufmaximum", HTTP_POST, [](AsyncWebServerRequest *request){
+    if (!request->hasParam("maximum", true)) {
+      request->send(400, "text/plain", "Maximale Vorlauftemperatur fehlt"); return;
+    }
+    const String text = request->getParam("maximum", true)->value();
+    char* end = nullptr;
+    const float value = strtof(text.c_str(), &end);
+    if (text.length() > 16 || end == text.c_str() || *end != '\0' ||
+        !isfinite(value) || value < 0 || value > 100) {
+      request->send(400, "text/plain", "Ungueltige Maximale Vorlauftemperatur (0 bis 100 Grad)"); return;
+    }
+    const bool hasCurve = request->hasParam("steilheit", true);
+    float curve = 0;
+    if (hasCurve) {
+      const String text = request->getParam("steilheit", true)->value();
+      char* end = nullptr;
+      curve = strtof(text.c_str(), &end);
+      if (text.length() > 16 || end == text.c_str() || *end != '\0' ||
+          !isfinite(curve) || curve < 0.1f || curve > 10) {
+        request->send(400, "text/plain", "Ungueltige Kurvensteilheit (0.1 bis 10)"); return;
+      }
+    }
+    uint32_t id = 0;
+    portENTER_CRITICAL(&roomSetpointMux);
+    if (!requestedFlowLimit.pending) {
+      uint32_t candidate = nextRoomSaveId + 1;
+      if (candidate == 0) candidate = 1;
+      RoomSaveResult& result = roomSaveResults[candidate % 8];
+      if (result.state != 1) {
+        nextRoomSaveId = id = candidate;
+        result = {id, 1};
+        requestedFlowLimit = {true, value, id, hasCurve, curve};
+      }
+    }
+    portEXIT_CRITICAL(&roomSetpointMux);
+    if (id == 0) { request->send(409, "text/plain", "Speichern laeuft bereits"); return; }
+    char response[40]; snprintf(response, sizeof(response), "{\"id\":%lu}", static_cast<unsigned long>(id));
+    request->send(202, "application/json", response);
+  });
+  server.on("/boilertemperatur", HTTP_POST, [](AsyncWebServerRequest *request){
+    if (!request->hasParam("soll", true)) {
+      request->send(400, "text/plain", "Boiler-Solltemperatur fehlt"); return;
+    }
+    const String text = request->getParam("soll", true)->value();
+    char* end = nullptr;
+    const float value = strtof(text.c_str(), &end);
+    if (text.length() > 16 || end == text.c_str() || *end != '\0' ||
+        !isfinite(value) || value < 0 || value > 100) {
+      request->send(400, "text/plain", "Ungueltige Boiler-Solltemperatur (0 bis 100 Grad)"); return;
+    }
+    const bool hasDifference = request->hasParam("differenz", true);
+    float difference = 0;
+    if (hasDifference) {
+      const String text = request->getParam("differenz", true)->value();
+      char* end = nullptr;
+      difference = strtof(text.c_str(), &end);
+      if (text.length() > 16 || end == text.c_str() || *end != '\0' ||
+          !isfinite(difference) || difference < 0 || difference > 100) {
+        request->send(400, "text/plain", "Ungueltige Einschaltdifferenz (0 bis 100 Grad)"); return;
+      }
+    }
+    uint32_t id = 0;
+    portENTER_CRITICAL(&roomSetpointMux);
+    if (!requestedBoilerSetpoint.pending) {
+      uint32_t candidate = nextRoomSaveId + 1;
+      if (candidate == 0) candidate = 1;
+      RoomSaveResult& result = roomSaveResults[candidate % 8];
+      if (result.state != 1) {
+        nextRoomSaveId = id = candidate;
+        result = {id, 1};
+        requestedBoilerSetpoint = {true, value, id, hasDifference, difference};
+      }
+    }
+    portEXIT_CRITICAL(&roomSetpointMux);
+    if (id == 0) { request->send(409, "text/plain", "Speichern laeuft bereits"); return; }
+    char response[40]; snprintf(response, sizeof(response), "{\"id\":%lu}", static_cast<unsigned long>(id));
+    request->send(202, "application/json", response);
+  });
+  server.on("/vorlaufmaximum-status", HTTP_GET, [](AsyncWebServerRequest *request){
+    if (!request->hasParam("id")) { request->send(400, "text/plain", "ID fehlt"); return; }
+    const String text = request->getParam("id")->value();
+    if (text.length() == 0 || text.length() > 10) { request->send(400, "text/plain", "ID ungueltig"); return; }
+    for (unsigned int i = 0; i < text.length(); ++i) {
+      if (text[i] < '0' || text[i] > '9') { request->send(400, "text/plain", "ID ungueltig"); return; }
+    }
+    const uint64_t parsed = strtoull(text.c_str(), nullptr, 10);
+    if (parsed == 0 || parsed > UINT32_MAX) { request->send(400, "text/plain", "ID ungueltig"); return; }
+    const uint32_t id = static_cast<uint32_t>(parsed);
+    portENTER_CRITICAL(&roomSetpointMux);
+    const RoomSaveResult result = roomSaveResults[id % 8];
+    portEXIT_CRITICAL(&roomSetpointMux);
+    if (result.id != id) { request->send(404, "text/plain", "Speicherauftrag nicht mehr verfuegbar"); return; }
+    char body[24]; snprintf(body, sizeof(body), "{\"state\":%u}", result.state);
+    AsyncWebServerResponse* response = request->beginResponse(200, "application/json", body);
+    response->addHeader("Cache-Control", "no-store"); request->send(response);
+  });
+  server.on("/boilertemperatur-status", HTTP_GET, [](AsyncWebServerRequest *request){
+    if (!request->hasParam("id")) { request->send(400, "text/plain", "ID fehlt"); return; }
+    const String text = request->getParam("id")->value();
+    if (text.length() == 0 || text.length() > 10) { request->send(400, "text/plain", "ID ungueltig"); return; }
+    for (unsigned int i = 0; i < text.length(); ++i) {
+      if (text[i] < '0' || text[i] > '9') { request->send(400, "text/plain", "ID ungueltig"); return; }
+    }
+    const uint64_t parsed = strtoull(text.c_str(), nullptr, 10);
+    if (parsed == 0 || parsed > UINT32_MAX) { request->send(400, "text/plain", "ID ungueltig"); return; }
+    const uint32_t id = static_cast<uint32_t>(parsed);
+    portENTER_CRITICAL(&roomSetpointMux);
+    const RoomSaveResult result = roomSaveResults[id % 8];
+    portEXIT_CRITICAL(&roomSetpointMux);
+    if (result.id != id) { request->send(404, "text/plain", "Speicherauftrag nicht mehr verfuegbar"); return; }
+    char body[24]; snprintf(body, sizeof(body), "{\"state\":%u}", result.state);
+    AsyncWebServerResponse* response = request->beginResponse(200, "application/json", body);
+    response->addHeader("Cache-Control", "no-store"); request->send(response);
+  });
   server.on("/raumtemperaturen-status", HTTP_GET, [](AsyncWebServerRequest *request){
     if (!request->hasParam("id")) { request->send(400, "text/plain", "ID fehlt"); return; }
     const String text = request->getParam("id")->value();

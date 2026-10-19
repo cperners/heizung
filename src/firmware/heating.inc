@@ -28,7 +28,7 @@ void Boilerbetrieb(){
   if (chckKessel()){
   chckBoiler();
   }
-  MischerZu(); //2023-10-15 Mischer Zu - sonst heizt Raum mit.
+  // Zeitlich begrenzte Schliessfahrt wird zentral in updateMischerBoilerMode betreut.
   SetOutPin();
 }
 /* *******************************************************************************************************

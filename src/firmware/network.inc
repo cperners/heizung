@@ -95,6 +95,8 @@ void mqttupdate() {
   doc["S4Boiler"].set(tBoiler);
   doc["T0Room"].set(tmyRoomdest);
   doc["T1Boiler"].set(tBoilerDest);
+  doc["boilerEinschaltdifferenz"] = tBoilerDiff;
+  doc["boilerLadestartUnter"] = tBoilerDest-tBoilerDiff;
   doc["T2Vorlauf"].set(vorlaufTemperatur);
   snprintf(line0, sizeof(line0), "%ld,%02d:%02d:%02d", uDay,uHour,uMinute,uSecond);
   doc["U0Uptime"].set(line0);

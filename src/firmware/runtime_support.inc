@@ -1,3 +1,37 @@
+bool saveBoilerSetpoint(float value, bool hasDifference = false, float difference = 0) {
+  if (!isfinite(value) || value < 0 || value > 100) return false;
+  if (hasDifference && (!isfinite(difference) || difference < 0 || difference > 100)) return false;
+  if (value == tBoilerDest && (!hasDifference || difference == tBoilerDiff)) return true;
+  const float previous = tBoilerDest, previousDifference = tBoilerDiff;
+  if (hasDifference) EEPROM.put(EEADDRESS_DIFFBOILER, difference);
+  EEPROM.put(EEADDRESS_BOILER, value);
+  if (!EEPROM.commit()) {
+    EEPROM.put(EEADDRESS_BOILER, previous);
+    if (hasDifference) EEPROM.put(EEADDRESS_DIFFBOILER, previousDifference);
+    return false;
+  }
+  tBoilerDest = value;
+  if (hasDifference) tBoilerDiff = difference;
+  return true;
+}
+
+bool saveFlowLimit(float value, bool hasCurve = false, float curve = 0) {
+  if (!isfinite(value) || value < 0 || value > 100) return false;
+  if (hasCurve && (!isfinite(curve) || curve < 0.1f || curve > 10)) return false;
+  if (value == tvmax && (!hasCurve || curve == n)) return true;
+  const float previous = tvmax, previousCurve = n;
+  if (hasCurve) EEPROM.put(EEADDRESS_NN, curve);
+  EEPROM.put(EEADDRESS_TVMAX, value);
+  if (!EEPROM.commit()) {
+    EEPROM.put(EEADDRESS_TVMAX, previous);
+    if (hasCurve) EEPROM.put(EEADDRESS_NN, previousCurve);
+    return false;
+  }
+  tvmax = value;
+  if (hasCurve) n = curve;
+  return true;
+}
+
 int currentGasDay() {
   const time_t utc = time(nullptr);
   if (utc < static_cast<time_t>(1577836800UL)) return 0;
@@ -260,6 +294,24 @@ QueueHandle_t mqttMessageQueue = nullptr;
 
 
 bool operatingModeStorageVerified = false;
+
+String boilerTemperatureDifferenceDisplay() {
+  if (!sensorIsUsable(0) || !sensorIsUsable(4) || !isfinite(tKessel) || !isfinite(tBoiler)) {
+    return "Nicht verfuegbar - Sensorfehler";
+  }
+  char text[32];
+  snprintf(text, sizeof(text), "%+.2f \xC2\xB0" "C", static_cast<double>(tKessel-tBoiler));
+  return String(text);
+}
+
+String boilerSettingDisplay() {
+  if (!isfinite(tBoilerDest) || !isfinite(tBoilerDiff)) return "Boilereinstellungen ungueltig";
+  char text[144];
+  snprintf(text, sizeof(text), "Soll: %.1f \xC2\xB0" "C; Einschaltdifferenz: %.1f \xC2\xB0" "C; neue Ladung unter %.1f \xC2\xB0" "C",
+           static_cast<double>(tBoilerDest), static_cast<double>(tBoilerDiff),
+           static_cast<double>(tBoilerDest-tBoilerDiff));
+  return String(text);
+}
 
 void leaveVacationMode() {
   operatingModeStorageVerified = false;

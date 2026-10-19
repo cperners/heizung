@@ -55,6 +55,28 @@ void loop(){
     if (result.id == roomRequest.id) result.state = saved ? 2 : 3;
     portEXIT_CRITICAL(&roomSetpointMux);
   }
+  portENTER_CRITICAL(&roomSetpointMux);
+  const BoilerSetpointRequest boilerRequest = requestedBoilerSetpoint;
+  requestedBoilerSetpoint.pending = false;
+  portEXIT_CRITICAL(&roomSetpointMux);
+  if (boilerRequest.pending) {
+    const bool saved = saveBoilerSetpoint(boilerRequest.value, boilerRequest.hasDifference, boilerRequest.difference);
+    portENTER_CRITICAL(&roomSetpointMux);
+    RoomSaveResult& result = roomSaveResults[boilerRequest.id % 8];
+    if (result.id == boilerRequest.id) result.state = saved ? 2 : 3;
+    portEXIT_CRITICAL(&roomSetpointMux);
+  }
+  portENTER_CRITICAL(&roomSetpointMux);
+  const FlowLimitRequest flowRequest = requestedFlowLimit;
+  requestedFlowLimit.pending = false;
+  portEXIT_CRITICAL(&roomSetpointMux);
+  if (flowRequest.pending) {
+    const bool saved = saveFlowLimit(flowRequest.value, flowRequest.hasCurve, flowRequest.curve);
+    portENTER_CRITICAL(&roomSetpointMux);
+    RoomSaveResult& result = roomSaveResults[flowRequest.id % 8];
+    if (result.id == flowRequest.id) result.state = saved ? 2 : 3;
+    portEXIT_CRITICAL(&roomSetpointMux);
+  }
   portENTER_CRITICAL(&webSettingsMux);
   const int webMode = requestedWebMode;
   requestedWebMode = -1;
@@ -75,6 +97,7 @@ void loop(){
   }
   enforceKesselSensorLock();
   updateMischerOffMode();
+  updateMischerBoilerMode();
   enforceVorlaufSensorLock();
   publishBrennerSensorLock();
   publishSensorStates();

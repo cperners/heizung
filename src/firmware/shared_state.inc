@@ -126,6 +126,10 @@ struct RoomSaveResult { uint32_t id; byte state; };
 RoomSaveResult roomSaveResults[8] = {};
 uint32_t nextRoomSaveId = 0;
 RoomSetpointRequest requestedRoomSetpoints = {};
+struct BoilerSetpointRequest { bool pending; float value; uint32_t id; bool hasDifference; float difference; };
+BoilerSetpointRequest requestedBoilerSetpoint = {};
+struct FlowLimitRequest { bool pending; float value; uint32_t id; bool hasCurve; float curve; };
+FlowLimitRequest requestedFlowLimit = {};
 portMUX_TYPE roomSetpointMux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE operatingModeMux = portMUX_INITIALIZER_UNLOCKED;
 
@@ -450,6 +454,7 @@ void MischerZu();
 void MischerStop();
 bool enforceVorlaufSensorLock();
 void updateMischerOffMode();
+void updateMischerBoilerMode();
 void SetToRT_Regelung();
 void sensorDS1820_indicateChip(byte pin);
 void sensorDS1820_reset(byte pin);

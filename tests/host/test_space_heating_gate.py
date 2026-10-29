@@ -8,9 +8,11 @@ a=s.index('void Heizungsbetrieb()');b=s.index('/* ******************************
 heating=s[a:b]
 head='''#include <cassert>
 #include <cmath>
+#include <limits>
 using std::isfinite;
 bool RoomHeizen=false,KesselHeizen=false,BoilerHeizen=false,HeizungsRelais=false,mischer_init_laeuft=false;
 int AussentemperaturRegelung=1;char daynight='D';float tmyRoomdest=0,tRoomTag=22.5,tRoomNacht=21.5,tKessel=20,kessel_min_temp=30;
+float tRoom=20;bool roomValid=true;bool sensorIsUsable(int){return roomValid;}
 bool fault=false;int rooms=0,boilers=0,stops=0,kesselCalls=0;
 bool heatingPumpSensorFault(){return fault;}
 void MischerStop(){++stops;}
@@ -29,6 +31,22 @@ for(float t : {29.9f,30.f,47.9f,48.f,90.f}){
 // Room mode retains the old gate; boiler calls remain unchanged.
 AussentemperaturRegelung=0;tKessel=35;rooms=boilers=0;Automatik();assert(rooms==0 && boilers==0);
 tKessel=48;Automatik();assert(rooms==1 && boilers==1);
+// Cold boiler does not stop a running pump while room heat is still needed.
+tKessel=35;tRoom=20;HeizungsRelais=true;rooms=0;Automatik();assert(HeizungsRelais && rooms==0);
+// The same cold boiler cannot start an idle pump.
+HeizungsRelais=false;Automatik();assert(!HeizungsRelais && rooms==0);
+// Room target remains effective below the old boiler threshold.
+HeizungsRelais=true;tRoom=tRoomTag;Automatik();assert(!HeizungsRelais);
+HeizungsRelais=true;tRoom=tRoomTag+1;Heizungsbetrieb();assert(!HeizungsRelais);
+// Inside the room hysteresis band, keep the previous state.
+tRoom=tRoomTag-0.05f;HeizungsRelais=true;Automatik();assert(HeizungsRelais);
+// An invalid or non-finite reading must not trigger a new room-target decision.
+roomValid=false;tRoom=30;HeizungsRelais=true;Automatik();assert(HeizungsRelais);
+roomValid=true;tRoom=std::numeric_limits<float>::quiet_NaN();Automatik();assert(HeizungsRelais);
+// Night target applies as well.
+daynight='N';tRoom=tRoomNacht;HeizungsRelais=true;Automatik();assert(!HeizungsRelais);daynight='D';
+// Turning off heat explicitly can still clear the request below the gate.
+RoomHeizen=false;HeizungsRelais=true;tRoom=20;controlSpaceHeating(false);assert(!HeizungsRelais);
 // Faults reach the existing sensor/run-on path rather than bypassing it.
 AussentemperaturRegelung=1;fault=true;tKessel=20;rooms=0;Automatik();assert(rooms==1);
 // Do not interrupt the independent reference movement.

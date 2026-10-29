@@ -1,7 +1,17 @@
 // Separate the outside-controlled heating circuit from the boiler charging gate.
 void controlSpaceHeating(bool kesselReady) {
   if (AussentemperaturRegelung == 0) {
-    if (kesselReady) chckRoom();
+    if (kesselReady) {
+      chckRoom();
+    } else {
+      // A cold boiler blocks a new start, not reaching the room target.
+      // Only use a fresh, finite room reading; central fault run-on stays active.
+      if (!RoomHeizen || (sensorIsUsable(3) && isfinite(tRoom) &&
+          isfinite(tmyRoomdest) && tRoom >= tmyRoomdest)) {
+        HeizungsRelais = false;
+      }
+      SetOutPin();
+    }
     return;
   }
   // Keep the existing pump fault run-on and sensor locks in chckRoom/SetOutPin.

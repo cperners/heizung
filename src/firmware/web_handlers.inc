@@ -92,6 +92,10 @@ String processor(const String& var){
                               "BRENNER GESPERRT - Kesselsensor ungueltig";
   }else if(var == "TKESSEL"){
     return readTemperature(tKessel);
+  }else if(var == "VORLAUFSOLL"){
+    return vorlaufCalculationDisplay(false);
+  }else if(var == "VORLAUFDIFF"){
+    return vorlaufCalculationDisplay(true);
   }else if(var == "TVORLAUF"){
     return readTemperature(tVorlauf);
   }else if(var == "TBOILER"){

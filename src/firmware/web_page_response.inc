@@ -10,6 +10,8 @@ static const char* const pagePlaceholderNames[] = {
   "TAUSSEN",
   "TKESSEL",
   "TVORLAUF",
+  "VORLAUFSOLL",
+  "VORLAUFDIFF",
   "TBOILER",
   "BOILERINFO",
   "BOILERDELTA",

@@ -113,6 +113,7 @@ void loop(){
     }
   unsigned long currentTime;
   updateKachelofenStatus();
+  serviceRegulatedMischerPulse();
   SetOutPin(); // Enforce pump fault deadlines on every loop pass.
   markLoopPhase(PHASE_OUTPUTS);
   MischerInit();

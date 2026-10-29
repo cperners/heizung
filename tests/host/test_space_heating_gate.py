@@ -1,61 +1,62 @@
-"""Check real mode orchestration at the independent heating/boiler boundaries."""
+"""Exercise real mode orchestration and room/curve decisions at the boiler gate."""
 from pathlib import Path
-import subprocess,tempfile
+import re,subprocess,tempfile
 root=Path(__file__).resolve().parents[2]
 s=(root/'src/firmware/heating.inc').read_text()
-helper=s[:s.index('/* *******************************************************************************************************\n                                         Boilerbetrieb')]
-a=s.index('void Heizungsbetrieb()');b=s.index('/* *******************************************************************************************************\n                                         kein Betrieb',a)
-heating=s[a:b]
+def function(name):
+ a=re.search(r'^void '+name+r'\(',s,re.M).start();b=s.index('{',a)+1;depth=1
+ while depth:
+  depth+=(s[b]=='{')-(s[b]=='}');b+=1
+ return s[a:b]+'\n'
 head='''#include <cassert>
 #include <cmath>
-#include <limits>
 using std::isfinite;
-bool RoomHeizen=false,KesselHeizen=false,BoilerHeizen=false,HeizungsRelais=false,mischer_init_laeuft=false;
-int AussentemperaturRegelung=1;char daynight='D';float tmyRoomdest=0,tRoomTag=22.5,tRoomNacht=21.5,tKessel=20,kessel_min_temp=30;
-float tRoom=20;bool roomValid=true;bool sensorIsUsable(int){return roomValid;}
-bool fault=false;int rooms=0,boilers=0,stops=0,kesselCalls=0;
+bool UrlaubBetrieb=false,RoomHeizen=false,KesselHeizen=false,BoilerHeizen=false,HeizungsRelais=false;
+bool mischer_init_laeuft=false,mischer_init_auf=true,mischer_init_zu=true;
+int AussentemperaturRegelung=1;char daynight='D';
+float tmyRoomdest=0,tRoomTag=22.5,tRoomNacht=21.5,tKessel=20,kessel_min_temp=30,tRoom=20,tRoomDiff=.1,tVorlauf=25,vorlaufTemperatur=30;
+bool fault=false,curveValid=true,heizkurveGueltig=true,RoomAnforderung=false;
+int moves=0,boilers=0,stops=0;
 bool heatingPumpSensorFault(){return fault;}
-void MischerStop(){++stops;}
-void SetOutPin(){}
-void chckRoom(){++rooms;if(!fault)HeizungsRelais=true;}
+bool updateHeatingCurve(bool=false){heizkurveGueltig=curveValid;vorlaufTemperatur=curveValid?30:0;return curveValid;}
+void regulateMischerToTarget(float){++moves;}
+void MischerStop(){++stops;}void SetOutPin(){}
 void chckBoiler(){++boilers;}
-int chckKessel(){++kesselCalls;return tKessel>=48;}
-void RoomAnforderungf(){} void BoilerAnforderungf(){}
+int chckKessel(){return tKessel>=48;}
+void RoomAnforderungf(){}void BoilerAnforderungf(){}
+void chckRoom(bool allowPumpStart=true);
 '''
 tests='''int main(){
-for(float t : {29.9f,30.f,47.9f,48.f,90.f}){
- tKessel=t; rooms=boilers=0;HeizungsRelais=true;Automatik();
- assert(rooms==(t>=30?1:0));assert(boilers==(t>=48?1:0));assert(HeizungsRelais==(t>=30));
- rooms=0;Heizungsbetrieb();assert(rooms==(t>=30?1:0));
+for(float t:{29.9f,30.f,47.9f,48.f,90.f}){
+ tKessel=t;moves=boilers=0;HeizungsRelais=false;Automatik();
+ assert(HeizungsRelais==(t>=30));assert(moves==(t>=30?1:0));assert(boilers==(t>=48?1:0));
+ moves=0;HeizungsRelais=false;Heizungsbetrieb();assert(HeizungsRelais==(t>=30));
 }
-// Room mode retains the old gate; boiler calls remain unchanged.
-AussentemperaturRegelung=0;tKessel=35;rooms=boilers=0;Automatik();assert(rooms==0 && boilers==0);
-tKessel=48;Automatik();assert(rooms==1 && boilers==1);
-// Cold boiler does not stop a running pump while room heat is still needed.
-tKessel=35;tRoom=20;HeizungsRelais=true;rooms=0;Automatik();assert(HeizungsRelais && rooms==0);
-// The same cold boiler cannot start an idle pump.
-HeizungsRelais=false;Automatik();assert(!HeizungsRelais && rooms==0);
-// Room target remains effective below the old boiler threshold.
-HeizungsRelais=true;tRoom=tRoomTag;Automatik();assert(!HeizungsRelais);
-HeizungsRelais=true;tRoom=tRoomTag+1;Heizungsbetrieb();assert(!HeizungsRelais);
-// Inside the room hysteresis band, keep the previous state.
-tRoom=tRoomTag-0.05f;HeizungsRelais=true;Automatik();assert(HeizungsRelais);
-// An invalid or non-finite reading must not trigger a new room-target decision.
-roomValid=false;tRoom=30;HeizungsRelais=true;Automatik();assert(HeizungsRelais);
-roomValid=true;tRoom=std::numeric_limits<float>::quiet_NaN();Automatik();assert(HeizungsRelais);
-// Night target applies as well.
-daynight='N';tRoom=tRoomNacht;HeizungsRelais=true;Automatik();assert(!HeizungsRelais);daynight='D';
-// Turning off heat explicitly can still clear the request below the gate.
-RoomHeizen=false;HeizungsRelais=true;tRoom=20;controlSpaceHeating(false);assert(!HeizungsRelais);
-// Faults reach the existing sensor/run-on path rather than bypassing it.
-AussentemperaturRegelung=1;fault=true;tKessel=20;rooms=0;Automatik();assert(rooms==1);
-// Do not interrupt the independent reference movement.
-fault=false;mischer_init_laeuft=true;stops=0;Automatik();assert(stops==0);
+// In room mode the old boiler gate still controls a new pump start.
+AussentemperaturRegelung=0;tKessel=35;tRoom=20;HeizungsRelais=false;moves=boilers=0;
+Automatik();assert(!HeizungsRelais && moves==0 && boilers==0);
+// A running circuit continues, with mixer regulation, even below that gate.
+HeizungsRelais=true;Automatik();assert(HeizungsRelais && moves==1);
+// Reaching the room target stops the request and normal mixer movement.
+tRoom=tRoomTag;stops=0;Automatik();assert(!HeizungsRelais && stops>0);
+tRoom=20;Automatik();assert(!HeizungsRelais);
+// Once warm enough, normal room hysteresis can start the pump again.
+tKessel=48;moves=0;Automatik();assert(HeizungsRelais && moves==1 && boilers==1);
+tRoom=tRoomTag-.05f;HeizungsRelais=true;Automatik();assert(HeizungsRelais);
+HeizungsRelais=false;Automatik();assert(!HeizungsRelais);
+// The night target is used too.
+daynight='N';tRoom=20;Automatik();assert(HeizungsRelais);tRoom=tRoomNacht;Automatik();assert(!HeizungsRelais);daynight='D';
+// Invalid curve inhibits normal pumping rather than freezing an old command.
+tRoom=20;curveValid=false;HeizungsRelais=true;Automatik();assert(!HeizungsRelais);curveValid=true;
+// Fault handling reaches the central output layer and stops normal mixing.
+fault=true;stops=0;Automatik();assert(stops>0);fault=false;
+// Initialization remains a separate movement and is not stopped here.
+mischer_init_laeuft=true;tRoom=tRoomTag;stops=0;Automatik();assert(stops==0);
 }
 '''
-with tempfile.TemporaryDirectory() as folder:
- source=Path(folder)/'test.cpp';binary=Path(folder)/'test'
- source.write_text(head+helper+heating+tests.replace('#unused',''))
- subprocess.run(['clang++','-std=c++11','-include','initializer_list',str(source),'-o',str(binary)],check=True)
- subprocess.run([str(binary)],check=True)
-print('Heizkreisfreigabe unter/ab 30 Grad, separate Boilergrenze, Raumregelung und Fehlerrouting geprueft.')
+source=head+function('controlSpaceHeating')+function('Automatik')+function('Heizungsbetrieb')+function('chckRoom')+tests
+with tempfile.TemporaryDirectory() as d:
+ p=Path(d)/'test.cpp';b=Path(d)/'test';p.write_text(source)
+ subprocess.run(['clang++','-std=c++11','-include','initializer_list','-fsanitize=address,undefined',str(p),'-o',str(b)],check=True)
+ subprocess.run([str(b)],check=True)
+print('Raum-Heizbedarf, Heizkurven-Mischer und separate Kesselfreigabe geprüft.')

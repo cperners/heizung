@@ -24,35 +24,39 @@ using byte=uint8_t;
 #define MISCHER_AUS_ZUFAHRT_MINUTEN 2UL
 #define MISCHER_WAIT 30
 #define MISCHER_DRIVE 5
+#define MISCHER_RUHEZONE_GRAD 0.5f
+constexpr uint32_t MISCHER_PULSE_MS = 5000;
 constexpr int BrennerPin=16,HeizungPin=4,BoilerPin=5,MischerAuf_Pin=18,MischerZu_Pin=2;
 int pins[64]={};void digitalWrite(int p,int v){pins[p]=v;}int digitalRead(int p){return pins[p];}
 unsigned long now=0;unsigned long millis(){return now;}
 bool valid[5]={true,true,true,true,true};bool sensorIsUsable(byte i){return i<5 && valid[i];}
 bool UrlaubBetrieb=false,WinterBetrieb=true,BoilerBetrieb=false,NurHeizung=false;
+bool mischerPulseActive=false;uint32_t mischerPulseStarted=0;
 bool offHeatRecoveryActive=false,RoomHeizen=true,BoilerHeizen=true,KesselHeizen=true;
 bool BrennerRelais=true,HeizungsRelais=false,BoilerRelais=false;
 bool MischerAufRelais=false,MischerZuRelais=false,RoomAnforderung=false,BoilerAnforderung=false,BoilerAufheizen=false;
 bool mischer_init_laeuft=false,mischer_init_auf=true,mischer_init_zu=true,mischerBoilerMode=false;
 unsigned long previousTime_MischerInit=0,mischer_init_time_auf=10000,mischer_init_time_zu=6000;
 int mischer_wait=0,mischer_drive=0,Pumpenloesen=0;
-float tKessel=60,tVorlauf=25,tAussen=12,tRoom=24,tRoomTag=22.5,tRoomNacht=21.5;
+float kessel_min_temp=30;
+float tBoiler=45.58f,tKessel=60,tVorlauf=25,tAussen=12,tRoom=24,tRoomTag=22.5,tRoomNacht=21.5,tRoomDiff=0.1f;
 float tmyRoomdest=22.5,vorlaufTemperatur=0,tvmax=40,taumin=-15,n=1.9,restwaermeZielTemp=35;
 bool heizkurveGueltig=false;int AussentemperaturRegelung=0;char daynight='D';
 struct Logger{template<class... T>void printf(T...){}template<class T>void println(T){}}Serial;
 void delay(int){}
 void MischerStop();void MischerAuf();void MischerZu();void SetOutPin();
 bool heatingPumpSensorFault();bool boilerPumpSensorFault();bool enforceVorlaufSensorLock();
-void runOffHeatRecovery();void regulateMischerToTarget(float);
+void runOffHeatRecovery();void regulateMischerToTarget(float);void startRegulatedMischerPulse(bool);
 '''
 # Include real state declarations for off mode and fault run-on.
 a=mix.index('bool vorlaufFaultOpening');b=mix.index('void updateMischerOffMode()',a)
 source=head+mix[a:b]
 a=heat.index('struct PumpFaultState');b=heat.index('void SetOutPin()',a)
 source+=heat[a:b]
-for text,name in [(runtime,'enforceKesselSensorLock'),(mix,'updateMischerOffMode'),(mix,'enforceVorlaufSensorLock'),(mix,'MischerAuf'),(mix,'MischerZu'),(mix,'MischerStop'),(mix,'MischerInit'),(heat,'heatingPumpSensorFault'),(heat,'boilerPumpSensorFault'),(heat,'SetOutPin'),(heat,'updateHeatingCurve'),(heat,'regulateMischerToTarget'),(heat,'runOffHeatRecovery'),(heat,'kein_Betrieb')]:
+for text,name in [(runtime,'enforceKesselSensorLock'),(mix,'updateMischerOffMode'),(mix,'enforceVorlaufSensorLock'),(mix,'MischerAuf'),(mix,'MischerZu'),(mix,'MischerStop'),(mix,'MischerInit'),(mix,'startRegulatedMischerPulse'),(mix,'serviceRegulatedMischerPulse'),(heat,'heatingPumpSensorFault'),(heat,'boilerPumpSensorFault'),(heat,'SetOutPin'),(heat,'updateHeatingCurve'),(heat,'regulateMischerToTarget'),(heat,'runOffHeatRecovery'),(heat,'kein_Betrieb'),(heat,'chckRoom')]:
  source+=function(text,name)
 source+='''
-void offLoop(){updateMischerOffMode();enforceVorlaufSensorLock();MischerInit();kein_Betrieb();assert(!BrennerRelais && pins[BrennerPin]==LOW);}
+void offLoop(){updateMischerOffMode();enforceVorlaufSensorLock();serviceRegulatedMischerPulse();MischerInit();kein_Betrieb();assert(!BrennerRelais && pins[BrennerPin]==LOW);}
 void reset(){
  WinterBetrieb=true;BoilerBetrieb=NurHeizung=UrlaubBetrieb=false;
  for(int i=0;i<5;++i)valid[i]=true;
@@ -72,7 +76,7 @@ int main(){
  assert(AussentemperaturRegelung==0 && heizkurveGueltig && vorlaufTemperatur>22.5 && vorlaufTemperatur<=40);
  assert(pins[MischerAuf_Pin]==HIGH && pins[MischerZu_Pin]==LOW && !mischer_init_laeuft);
  // Normal pulse ends after the independent one-second countdown ticks.
- mischer_drive=0;mischer_wait=25;offLoop();assert(!pins[MischerAuf_Pin] && !pins[MischerZu_Pin]);
+ now+=5000;mischer_wait=25;offLoop();assert(!pins[MischerAuf_Pin] && !pins[MischerZu_Pin]);
  tVorlauf=45;mischer_wait=0;offLoop();assert(pins[MischerZu_Pin] && !pins[MischerAuf_Pin]);
  // Cold outside still cannot raise the target above the configured maximum.
  tAussen=-50;offLoop();assert(vorlaufTemperatur<=tvmax);
@@ -108,6 +112,25 @@ int main(){
  tKessel=40;offLoop();assert(!offHeatRecoveryActive && !pins[HeizungPin]);
  // Night target is used without switching to room control.
  reset();daynight='N';offLoop();assert(tmyRoomdest==tRoomNacht && pins[HeizungPin]);
+ // Boiler heat-flow guard works even if the charging routine was skipped.
+ reset();WinterBetrieb=true;tKessel=43;tBoiler=45.58f;BoilerRelais=true;BoilerAufheizen=true;
+ SetOutPin();assert(!pins[BoilerPin] && !BoilerRelais && BoilerAufheizen);
+ tBoiler=42.9f;BoilerRelais=true;SetOutPin();assert(pins[BoilerPin]);
+ tBoiler=43;SetOutPin();assert(!pins[BoilerPin]);
+ // Preserve the already agreed bounded sensor-fault run-on.
+ tBoiler=42;BoilerRelais=true;SetOutPin();assert(pins[BoilerPin]);
+ valid[4]=false;tBoiler=46;SetOutPin();assert(pins[BoilerPin]);
+ now+=600000;SetOutPin();assert(!pins[BoilerPin]);
+ // A stopped pump still cannot start on an invalid boiler reading.
+ reset();WinterBetrieb=true;valid[4]=false;BoilerRelais=true;SetOutPin();assert(!pins[BoilerPin]);
+ // Normal room mode needs both room and outside sensors, unlike rest heat.
+ reset();WinterBetrieb=true;RoomHeizen=true;tRoom=20;tmyRoomdest=22.5;
+ valid[2]=false;assert(heatingPumpSensorFault());
+ valid[2]=true;valid[3]=false;assert(heatingPumpSensorFault());
+ // A valid room call now controls the mixer on a curve while its pump runs.
+ valid[3]=true;mischer_init_auf=mischer_init_zu=true;
+ chckRoom(true);assert(pins[HeizungPin] && pins[MischerAuf_Pin]);
+ tRoom=tmyRoomdest;chckRoom(true);assert(!pins[HeizungPin] && !pins[MischerAuf_Pin]);
  // Non-finite boiler temperature is never considered cooled.
  reset();valid[0]=false;tKessel=std::numeric_limits<float>::quiet_NaN();offLoop();
  assert(offHeatRecoveryActive && !pins[HeizungPin] && !pins[MischerZu_Pin]);

@@ -46,6 +46,8 @@ void refreshWebStatus() {
   values["taussen"] = readTemperature(tAussen);
   values["tkessel"] = readTemperature(tKessel);
   values["tvorlauf"] = readTemperature(tVorlauf);
+  values["vorlauf-soll"] = vorlaufCalculationDisplay(false);
+  values["vorlauf-diff"] = vorlaufCalculationDisplay(true);
   values["tboiler"] = readTemperature(tBoiler);
   values["boiler-settings"] = boilerSettingDisplay();
   values["boiler-delta"] = boilerTemperatureDifferenceDisplay();

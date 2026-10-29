@@ -19,6 +19,8 @@
 #define BAUD_RATE 115200
 #define MISCHER_WAIT 30
 #define MISCHER_DRIVE 5
+// Innerhalb dieser Abweichung vom Vorlauf-Sollwert keine normale Stellfahrt.
+#define MISCHER_RUHEZONE_GRAD 0.5f
 // Einmalige Schliessfahrt beim Wechsel auf Betriebsart AUS (auch Start in AUS).
 #define MISCHER_AUS_ZUFAHRT_MINUTEN 2UL
 // Einmalige Schliessfahrt in NUR BOILER, ohne Restwaerme-Wartebedingung.

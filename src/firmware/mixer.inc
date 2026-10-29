@@ -43,6 +43,7 @@ void updateMischerOffMode() {
       digitalWrite(MischerAuf_Pin, LOW);
       digitalWrite(MischerZu_Pin, LOW);
       MischerAufRelais = MischerZuRelais = false;
+      mischerPulseActive = false;
       mischerOffMode = false;
       mischerOffClosing = false;
     }
@@ -64,6 +65,7 @@ void updateMischerOffMode() {
     digitalWrite(MischerAuf_Pin, LOW);
     digitalWrite(MischerZu_Pin, LOW);
     MischerAufRelais = MischerZuRelais = false;
+      mischerPulseActive = false;
   }
   const bool cool = sensorIsUsable(0) && isfinite(tKessel) &&
                     tKessel <= restwaermeZielTemp;
@@ -73,6 +75,7 @@ void updateMischerOffMode() {
       digitalWrite(MischerAuf_Pin, LOW);
       digitalWrite(MischerZu_Pin, LOW);
       MischerAufRelais = MischerZuRelais = false;
+      mischerPulseActive = false;
       mischer_wait = mischer_drive = 0;
       Serial.println("AUS: geregelte Restwaermeabfuhr, Brenner gesperrt");
     }
@@ -82,6 +85,7 @@ void updateMischerOffMode() {
     return; // kein_Betrieb regulates the heating circuit, never the burner.
   }
   if (offHeatRecoveryActive) {
+    mischerPulseActive = false;
     offHeatRecoveryActive = false;
     vorlaufFaultOpening = false;
     mischer_wait = mischer_drive = 0;
@@ -116,6 +120,7 @@ bool enforceVorlaufSensorLock() {
     }
     return false;
   }
+  mischerPulseActive = false;
   if (!faultActive) {
     faultActive = true;
     vorlaufFaultStarted = millis();
@@ -213,6 +218,31 @@ void updateMischerBoilerMode() {
   }
 }
 
+static_assert(MISCHER_DRIVE > 0 && MISCHER_DRIVE <= 0xFFFFFFFFUL / 1000UL,
+              "Ungueltige normale Mischer-Fahrzeit");
+static_assert(MISCHER_RUHEZONE_GRAD >= 0.0f && MISCHER_RUHEZONE_GRAD <= 10.0f,
+              "Ungueltige Mischer-Ruhezone");
+constexpr uint32_t MISCHER_PULSE_MS = MISCHER_DRIVE * 1000UL;
+
+void startRegulatedMischerPulse(bool opening) {
+  if (enforceVorlaufSensorLock()) return;
+  if (opening) MischerAuf();
+  else MischerZu();
+  mischerPulseStarted = static_cast<uint32_t>(millis());
+  mischerPulseActive = true;
+  mischer_drive = MISCHER_DRIVE;
+}
+
+void serviceRegulatedMischerPulse() {
+  if (!mischerPulseActive) return;
+  const bool needsMixer = offHeatRecoveryActive ||
+      (!UrlaubBetrieb && (WinterBetrieb || NurHeizung) && HeizungsRelais);
+  if (!needsMixer ||
+      static_cast<uint32_t>(static_cast<uint32_t>(millis()) - mischerPulseStarted) >= MISCHER_PULSE_MS) {
+    MischerStop();
+  }
+}
+
 void MischerInit(){
   if (enforceVorlaufSensorLock()) return;
   if (mischerBoilerMode || mischerOffMode) return;
@@ -245,6 +275,7 @@ void MischerInit(){
 //#################################################################################################################################
 void MischerAuf(){
   if (enforceVorlaufSensorLock()) return;
+  mischerPulseActive = false;
   digitalWrite(MischerZu_Pin, LOW);
   MischerZuRelais=false;
   digitalWrite(MischerAuf_Pin, HIGH);
@@ -259,6 +290,7 @@ void MischerAuf(){
 //#################################################################################################################################
 void MischerZu(){
   if (enforceVorlaufSensorLock()) return;
+  mischerPulseActive = false;
   digitalWrite(MischerAuf_Pin, LOW);
   MischerAufRelais=false;
   digitalWrite(MischerZu_Pin, HIGH);
@@ -272,6 +304,8 @@ void MischerZu(){
 }
 //#################################################################################################################################
 void MischerStop(){
+  mischerPulseActive = false;
+  mischer_drive = 0;
   // Normal regulation must not interrupt the explicitly requested fault run.
   // Also check its deadline here, in case another caller reaches us first.
   if (vorlaufFaultOpening &&

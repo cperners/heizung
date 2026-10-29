@@ -1,17 +1,8 @@
 // Separate the outside-controlled heating circuit from the boiler charging gate.
 void controlSpaceHeating(bool kesselReady) {
   if (AussentemperaturRegelung == 0) {
-    if (kesselReady) {
-      chckRoom();
-    } else {
-      // A cold boiler blocks a new start, not reaching the room target.
-      // Only use a fresh, finite room reading; central fault run-on stays active.
-      if (!RoomHeizen || (sensorIsUsable(3) && isfinite(tRoom) &&
-          isfinite(tmyRoomdest) && tRoom >= tmyRoomdest)) {
-        HeizungsRelais = false;
-      }
-      SetOutPin();
-    }
+    // The boiler gate prevents a new start; an active circuit still regulates.
+    chckRoom(kesselReady);
     return;
   }
   // Keep the existing pump fault run-on and sensor locks in chckRoom/SetOutPin.
@@ -152,14 +143,19 @@ bool updateHeatingCurve(bool forceOutside = false) {
 
 // Shared pulse controller: no heat generation or pump decisions here.
 void regulateMischerToTarget(float target) {
-  if (!isfinite(target)) { MischerStop(); return; }
+  if (!isfinite(target) || !isfinite(tVorlauf)) { MischerStop(); return; }
+  const float error = target - tVorlauf;
+  if (fabsf(error) <= MISCHER_RUHEZONE_GRAD) {
+    MischerStop();
+    return;
+  }
+  // Do not finish an opening pulse if a new reading already calls for closing.
+  if (mischerPulseActive && ((MischerAufRelais && error < 0) ||
+                            (MischerZuRelais && error > 0))) MischerStop();
   if (mischer_wait == 0) {
     mischer_wait = MISCHER_WAIT;
-    mischer_drive = MISCHER_DRIVE;
-    if (tVorlauf < target) MischerAuf();
-    else MischerZu();
+    startRegulatedMischerPulse(error > 0);
   }
-  if ((MischerAufRelais || MischerZuRelais) && !mischer_drive) MischerStop();
 }
 
 void runOffHeatRecovery() {
@@ -179,20 +175,17 @@ void runOffHeatRecovery() {
 }
 
 void RoomAnforderungf(){
-  if (heatingPumpSensorFault()) { RoomAnforderung = false; return; }
-  if(AussentemperaturRegelung==0){
-    if (tRoom < tmyRoomdest){
-      RoomAnforderung=true;
-    }else{
-      RoomAnforderung=false;
-    }
-  }else{
-    if (updateHeatingCurve() && tVorlauf < vorlaufTemperatur){
-      RoomAnforderung=true;
-    }else{
-      RoomAnforderung=false;
-    }
+  if (heatingPumpSensorFault()) {
+    RoomAnforderung = false;
+    heizkurveGueltig = false;
+    vorlaufTemperatur = 0.0f;
+    return;
   }
+  const bool needsCurve = AussentemperaturRegelung != 0 ||
+      (!UrlaubBetrieb && (WinterBetrieb || NurHeizung));
+  if (needsCurve && !updateHeatingCurve(true)) { RoomAnforderung = false; return; }
+  if (AussentemperaturRegelung == 0) RoomAnforderung = tRoom < tmyRoomdest;
+  else RoomAnforderung = tVorlauf < vorlaufTemperatur;
 }
 /* *******************************************************************************************************
                                          Kachelofen Status
@@ -246,9 +239,12 @@ void BoilerAnforderungf(){
                                          Ausgänge schalten
 ******************************************************************************************************* */
 bool heatingPumpSensorFault() {
-  const bool useOutsideSensor = offHeatRecoveryActive || AussentemperaturRegelung != 0;
+  const bool combinedRoomControl = !offHeatRecoveryActive && !UrlaubBetrieb &&
+      (WinterBetrieb || NurHeizung) && AussentemperaturRegelung == 0;
+  const bool useOutsideSensor = offHeatRecoveryActive || AussentemperaturRegelung != 0 || combinedRoomControl;
   return !sensorIsUsable(0) || !sensorIsUsable(1) ||
-         !sensorIsUsable(useOutsideSensor ? 2 : 3);
+         !sensorIsUsable(useOutsideSensor ? 2 : 3) ||
+         (combinedRoomControl && !sensorIsUsable(3));
 }
 
 bool boilerPumpSensorFault() {
@@ -297,6 +293,11 @@ void SetOutPin(){
   enforceKesselSensorLock();
   const bool heatingFault = heatingPumpSensorFault();
   const bool boilerFault = boilerPumpSensorFault();
+  // Recheck heat flow on every output pass, even when chckBoiler is gated.
+  // Leave the existing sensor-fault run-on to pumpOutputWithFault below.
+  if (!boilerFault && (!isfinite(tKessel) || !isfinite(tBoiler) || tKessel <= tBoiler)) {
+    BoilerRelais = false;
+  }
   const bool heatingOn = pumpOutputWithFault(heatingPumpFault, heatingFault,
       HeizungsRelais || Pumpenloesen, HeizungPin, "Heizungspumpe");
   const bool boilerOn = pumpOutputWithFault(boilerPumpFault, boilerFault,
@@ -366,44 +367,34 @@ int chckKessel() {
 /* *******************************************************************************************************
                                          Room Check
 ******************************************************************************************************* */
-void chckRoom() {
+void chckRoom(bool allowPumpStart) {
   if (heatingPumpSensorFault()) {
     RoomAnforderung = false;
     if (!mischer_init_laeuft) MischerStop();
     SetOutPin();
     return;
   }
-
-  updateHeatingCurve();
-  if (AussentemperaturRegelung != 0 && !heizkurveGueltig) {
+  const bool curveControl = AussentemperaturRegelung != 0 || !UrlaubBetrieb;
+  updateHeatingCurve(curveControl);
+  if (curveControl && !heizkurveGueltig) {
     RoomAnforderung = false;
+    HeizungsRelais = false;
     if (!mischer_init_laeuft) MischerStop();
     SetOutPin();
     return;
   }
-
-  if(RoomHeizen==false){
-    HeizungsRelais=false;
-  }else{
-    if(AussentemperaturRegelung == 0){
-      if (tRoom >= tmyRoomdest)
-      {
-        HeizungsRelais=false;//AUS
-        //Serial.write("Heizungspumpe ausschalten\n");
-      }
-      if(tRoom < (tmyRoomdest-tRoomDiff)) {
-        HeizungsRelais=true;//EIN
-        //Serial.write("Heizungspumpe einschalten\n");
-      }
-    }else { //AussentemperaturRegelung == 1
-      //Serial.println("AussentemperaturRegelung == 1, HeizungsRelais ein");
-      if(tKessel>=kessel_min_temp){
-        HeizungsRelais=true;//erst bei einer Mindesttemperatur des Kessels Pumpe ein
-      }
-    if(!mischer_init_laeuft && mischer_init_auf && mischer_init_zu){
-      regulateMischerToTarget(vorlaufTemperatur);
-    }
-    }
+  if (!RoomHeizen) {
+    HeizungsRelais = false;
+  } else if (AussentemperaturRegelung == 0) {
+    if (tRoom >= tmyRoomdest) HeizungsRelais = false;
+    if (allowPumpStart && tRoom < tmyRoomdest - tRoomDiff) HeizungsRelais = true;
+  } else {
+    HeizungsRelais = tKessel >= kessel_min_temp;
+  }
+  if (curveControl && HeizungsRelais && !mischer_init_laeuft && mischer_init_auf && mischer_init_zu) {
+    regulateMischerToTarget(vorlaufTemperatur);
+  } else if (!mischer_init_laeuft) {
+    MischerStop();
   }
   SetOutPin();
 }

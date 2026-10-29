@@ -327,6 +327,21 @@ QueueHandle_t mqttMessageQueue = nullptr;
 
 bool operatingModeStorageVerified = false;
 
+String vorlaufCalculationDisplay(bool difference) {
+  const bool curveSelected = offHeatRecoveryActive ||
+      (!UrlaubBetrieb && (WinterBetrieb || NurHeizung));
+  if (!curveSelected) return "Nicht aktiv";
+  if (!sensorIsUsable(0) || !sensorIsUsable(1) || !sensorIsUsable(2) ||
+      (!offHeatRecoveryActive && AussentemperaturRegelung == 0 && !sensorIsUsable(3)))
+    return "Nicht verfuegbar - Sensorfehler";
+  if (!heizkurveGueltig || !isfinite(vorlaufTemperatur) || !isfinite(tvmax) ||
+      vorlaufTemperatur > tvmax || !isfinite(tVorlauf)) return "Keine gueltige Berechnung";
+  char text[32];
+  if (difference) snprintf(text, sizeof(text), "%+.2f \xC2\xB0" "C", static_cast<double>(tVorlauf-vorlaufTemperatur));
+  else snprintf(text, sizeof(text), "%.2f \xC2\xB0" "C", static_cast<double>(vorlaufTemperatur));
+  return String(text);
+}
+
 String boilerTemperatureDifferenceDisplay() {
   if (!sensorIsUsable(0) || !sensorIsUsable(4) || !isfinite(tKessel) || !isfinite(tBoiler)) {
     return "Nicht verfuegbar - Sensorfehler";

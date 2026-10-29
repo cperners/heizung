@@ -123,6 +123,8 @@ form { line-height: 2; font-size: .9rem; }
     <span id="tvorlauf">%TVORLAUF%</span>
     <sup class="units">&deg;C</sup>
     </div>
+    <p style="font-size:.9rem;margin:8px 0;color:#607681;">Berechneter Sollwert: <span id="vorlauf-soll">%VORLAUFSOLL%</span><br>
+    Differenz Ist &minus; Soll: <span id="vorlauf-diff">%VORLAUFDIFF%</span></p>
     <div class="equipment-status mixer-status">
       <svg id="mixer-symbol" viewBox="0 0 32 32" role="img" aria-label="Mischerstatus wird geladen"><title>Mischerstatus wird geladen</title><g fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M2 13h7m14 0h7M16 20v10M1 9v8m30-8v8M12 31h8"/><path d="m9 7 14 12V7L9 19ZM16 13v7M16 7V2m-5 0h10"/></g></svg>
       <span id="mixer-direction">Wird geladen</span>
@@ -200,6 +202,7 @@ form { line-height: 2; font-size: .9rem; }
       </select></p>
       <button class="threshold-save" type="submit">&Uuml;bernehmen</button>
     </form>
+    <p style="font-size:.8rem;color:#607681;">Raumregelung: Heizbedarf nach Raumtemperatur, Vorlauf nach Heizkurve. G&uuml;ltiger Au&szlig;enf&uuml;hler erforderlich.</p>
   </div>
   <div>
     <h3>Betriebsart</h3>
@@ -405,7 +408,7 @@ function showTemperatureTrend(key, direction) {
   arrow.className = 'temperature-trend' + (direction === 1 ? ' up' : direction === -1 ? ' down' : '');
   arrow.title = label; arrow.setAttribute('aria-label', label);
 }
-var statusTextKeys = ['troom','taussen','tkessel','tvorlauf','tboiler','tkachelofen','header-clock','brennersperre','regelungsart','betriebsart','gas-day','gas-total','ntp-abweichung','kachelofen-status','uptime','cpu-load','wifi-ssid','wifi-rssi','ota-status','recovery-status','boiler-settings','boiler-delta'];
+var statusTextKeys = ['troom','taussen','tkessel','tvorlauf','vorlauf-soll','vorlauf-diff','tboiler','tkachelofen','header-clock','brennersperre','regelungsart','betriebsart','gas-day','gas-total','ntp-abweichung','kachelofen-status','uptime','cpu-load','wifi-ssid','wifi-rssi','ota-status','recovery-status','boiler-settings','boiler-delta'];
 var sharedStatusPending = false;
 var diagnosticKeys = ['heap-free','heap-min','heap-largest','loop-recent','loop-max','loop-slow'];
 function showDiagnostics(health) {

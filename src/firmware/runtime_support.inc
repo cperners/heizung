@@ -1,3 +1,29 @@
+void serviceWifiReconnect() {
+  static bool attempted = false;
+  static unsigned long lastAttempt = 0;
+  const unsigned long now = millis();
+  bool due = false;
+  portENTER_CRITICAL(&wifiReconnectMux);
+  if (wifiRecon && (unsigned long)(now - previousTime_wifi) >= WIFI_RECON_TIMER &&
+      (!attempted || (unsigned long)(now - lastAttempt) >= 15000UL)) {
+    wifiRecon = false;
+    due = true;
+  }
+  portEXIT_CRITICAL(&wifiReconnectMux);
+  if (!due) return;
+  // A late request must never disconnect a connection that already recovered.
+  if (WiFi.status() == WL_CONNECTED && static_cast<uint32_t>(WiFi.localIP()) != 0) return;
+  portENTER_CRITICAL(&wifiReconnectMux);
+  ++wifiReconnectCount;
+  portEXIT_CRITICAL(&wifiReconnectMux);
+  attempted = true;
+  lastAttempt = now;
+  // Leave an in-progress connection time to complete before the next attempt.
+  // Arm the next attempt even if the driver produces no new disconnect event.
+  connectToWifi();
+  WiFi.reconnect();
+}
+
 bool saveBoilerSetpoint(float value, bool hasDifference = false, float difference = 0) {
   if (!isfinite(value) || value < 0 || value > 100) return false;
   if (hasDifference && (!isfinite(difference) || difference < 0 || difference > 100)) return false;
@@ -15,20 +41,25 @@ bool saveBoilerSetpoint(float value, bool hasDifference = false, float differenc
   return true;
 }
 
-bool saveFlowLimit(float value, bool hasCurve = false, float curve = 0) {
+bool saveFlowLimit(float value, bool hasCurve = false, float curve = 0,
+                   bool hasRecovery = false, float recovery = 0) {
   if (!isfinite(value) || value < 0 || value > 100) return false;
   if (hasCurve && (!isfinite(curve) || curve < 0.1f || curve > 10)) return false;
-  if (value == tvmax && (!hasCurve || curve == n)) return true;
-  const float previous = tvmax, previousCurve = n;
+  if (hasRecovery && (!isfinite(recovery) || recovery < 30 || recovery > 40)) return false;
+  if (value == tvmax && (!hasCurve || curve == n) && (!hasRecovery || recovery == restwaermeZielTemp)) return true;
+  const float previous = tvmax, previousCurve = n, previousRecovery = restwaermeZielTemp;
+  if (hasRecovery) EEPROM.put(EEADDRESS_RESTWAERME_ZIEL, recovery);
   if (hasCurve) EEPROM.put(EEADDRESS_NN, curve);
   EEPROM.put(EEADDRESS_TVMAX, value);
   if (!EEPROM.commit()) {
     EEPROM.put(EEADDRESS_TVMAX, previous);
     if (hasCurve) EEPROM.put(EEADDRESS_NN, previousCurve);
+    if (hasRecovery) EEPROM.put(EEADDRESS_RESTWAERME_ZIEL, previousRecovery);
     return false;
   }
   tvmax = value;
   if (hasCurve) n = curve;
+  if (hasRecovery) restwaermeZielTemp = recovery;
   return true;
 }
 
@@ -259,6 +290,7 @@ bool repairSchedule(int address, float fallback) {
 void initializeStoredSettings() {
   bool changed = false;
   changed |= repairSetting(EEADDRESS_URLAUB_TEMP, URLAUB_DEFAULT_TEMP, 5, 40);
+  changed |= repairSetting(EEADDRESS_RESTWAERME_ZIEL, float(MISCHER_AUS_KESSEL_MAX_TEMP), 30, 40);
   changed |= repairSetting(EEADDRESS_URLAUB_AKTIV, byte(0), 0, 1);
   changed |= repairSetting(EEADDRESS_BOILER, eeBoiler, 0, 100);
   changed |= repairSetting(EEADDRESS_RAUM, eeRaum, 5, 40);

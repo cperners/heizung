@@ -17,6 +17,7 @@ static const char* const pagePlaceholderNames[] = {
   "BOILERDIFF",
   "VORLAUFMAX",
   "KURVENSTEILHEIT",
+  "RESTWAERMEZIEL",
   "TKACHELOFEN",
   "KACHELOFENSTATUS",
   "REGELUNGSART",

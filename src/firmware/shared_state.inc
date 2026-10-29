@@ -70,7 +70,7 @@ IPAddress subnet(255, 255, 255, 0);
 IPAddress primaryDNS(192, 168, 0, 1);   //optional
 IPAddress secondaryDNS(8, 8, 8, 8); //optional
 
-bool connect2wifi, connect2mqtt = false;
+bool connect2mqtt = false;
 
 int avg_time_ms;
 /* *******************************************************************************************************
@@ -81,6 +81,8 @@ float tVorlauf,tAussen,tKessel,tKesselDest,tKesselDiff,tBoiler,tBoilerDest,tBoil
   tRoomNacht;
 float vorlaufTemperatur; // errechnete vorlaufTemperatur für Regelung
 bool heizkurveGueltig = false;
+bool offHeatRecoveryActive = false;
+float restwaermeZielTemp = MISCHER_AUS_KESSEL_MAX_TEMP;
 float tmyRoomdest;//Zieltemperature je nach Tageszeit
 byte WinterBetrieb,BoilerBetrieb,NurHeizung;
 byte UrlaubBetrieb = 0;
@@ -113,7 +115,7 @@ unsigned long kachelofenLastUpdate = 0;
 float kachelofenEinTemp = 50.0;
 float kachelofenAusTemp = 40.0;
 // LoRaWAN liefert alle 5 Minuten; zwei ausgefallene Meldungen ueberbruecken.
-const unsigned long kachelofenTimeout = 16UL * 60UL * 1000UL;
+const unsigned long kachelofenTimeout = 21UL * 60UL * 1000UL;
 enum RegelungsModus { REGELUNG_AUTO, REGELUNG_RAUM, REGELUNG_AUSSEN };
 RegelungsModus regelungsModus = REGELUNG_AUTO;
 int requestedWebMode = -1;
@@ -128,7 +130,7 @@ uint32_t nextRoomSaveId = 0;
 RoomSetpointRequest requestedRoomSetpoints = {};
 struct BoilerSetpointRequest { bool pending; float value; uint32_t id; bool hasDifference; float difference; };
 BoilerSetpointRequest requestedBoilerSetpoint = {};
-struct FlowLimitRequest { bool pending; float value; uint32_t id; bool hasCurve; float curve; };
+struct FlowLimitRequest { bool pending; float value; uint32_t id; bool hasCurve; float curve; bool hasRecovery; float recovery; };
 FlowLimitRequest requestedFlowLimit = {};
 portMUX_TYPE roomSetpointMux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE operatingModeMux = portMUX_INITIALIZER_UNLOCKED;
@@ -215,6 +217,10 @@ unsigned long previousTime1 = 0;
 unsigned long previousTime_MischerInit = 0;
 unsigned long previousTime_wifi = 0;
 bool wifiRecon = false;
+portMUX_TYPE wifiReconnectMux = portMUX_INITIALIZER_UNLOCKED;
+uint32_t wifiDisconnectCount = 0;
+uint32_t wifiReconnectCount = 0;
+uint8_t wifiLastDisconnectReason = 0;
 bool mqttRecon = false;
 unsigned long previousTime_mqtt = 0;
 volatile bool readSensor = false;
@@ -383,7 +389,7 @@ void ntpupdate();
 void set2mqttupdate();
 void mqttupdate();
 void connect();
-void WiFiEvent(WiFiEvent_t event);
+void WiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info);
 void onMqttConnect(bool sessionPresent);
 void onMqttDisconnect(AsyncMqttClientDisconnectReason reason);
 void onMqttSubscribe(uint16_t packetId, uint8_t qos);
@@ -437,6 +443,8 @@ bool boilerPumpSensorFault();
 void kein_Betrieb();
 int chckKessel();
 void chckRoom();
+void runOffHeatRecovery();
+void regulateMischerToTarget(float target);
 void chckBoiler();
 void Regelungs_Switch_AI();
 void Serial_Read();

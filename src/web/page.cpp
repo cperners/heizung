@@ -141,8 +141,15 @@ form { line-height: 2; font-size: .9rem; }
         <div class="threshold-value"><input id="flow-curve" name="steilheit" type="number" min="0.1" max="10" step="0.1" value="%KURVENSTEILHEIT%" readonly required></div>
         <button type="button" aria-label="Kurvensteilheit erh&ouml;hen" onclick="document.getElementById('flow-curve').stepUp()">+</button>
       </div>
+      <label for="flow-recovery">Restw&auml;rme-Zieltemperatur bei Aus</label>
+      <div class="threshold-row">
+        <button type="button" aria-label="Restwaerme-Zieltemperatur senken" onclick="document.getElementById('flow-recovery').stepDown()">&minus;</button>
+        <div class="threshold-value"><input id="flow-recovery" name="restwaerme" type="number" min="30" max="40" step="0.1" value="%RESTWAERMEZIEL%" readonly required><span>&deg;C</span></div>
+        <button type="button" aria-label="Restwaerme-Zieltemperatur erh&ouml;hen" onclick="document.getElementById('flow-recovery').stepUp()">+</button>
+      </div>
+      <small>Bis zu dieser Kesseltemperatur wird bei Aus Restw&auml;rme geregelt abgef&uuml;hrt. Standard: 35 &deg;C.</small>
       <p id="flow-save-status" class="threshold-hint" role="status">&Auml;nderungen erst mit Speichern &uuml;bernehmen.</p>
-      <button id="flow-save" class="threshold-save" type="submit">Heizkurveneinstellungen speichern</button>
+      <button id="flow-save" class="threshold-save" type="submit">Vorlaufeinstellungen speichern</button>
     </form>
   </div>
   <div>
@@ -302,6 +309,7 @@ function adjustThreshold(id, direction) {
     <p>Schleifenabstand, zuletzt max.: <span id="loop-recent">--</span><br>
     Maximum seit Start: <span id="loop-max">--</span><br>
     Abst&auml;nde &uuml;ber 100 ms: <span id="loop-slow">--</span></p>
+    <p>Neustart und Verbindung: <span id="recovery-status">Noch keine Diagnose</span></p>
     <p>OTA: <span id="ota-status">Noch keine Diagnose</span></p>
     <small>Abstand zwischen zwei Schleifenstarts inklusive Wartezeiten; keine reine CPU-Rechenzeit. Historische Maxima bleiben bis zum Neustart erhalten.</small>
   </div>
@@ -375,7 +383,7 @@ document.getElementById('flow-limit').addEventListener('submit', async function(
     for (var attempt = 0; attempt < 20; ++attempt) {
       await new Promise(function(resolve) { setTimeout(resolve, 500); });
       var result = await roomSaveRequest('/vorlaufmaximum-status?id='+accepted.id, 'GET');
-      if (result.state === 2) { status.textContent = 'Heizkurveneinstellungen gespeichert.'; confirmed = true; break; }
+      if (result.state === 2) { status.textContent = 'Vorlaufeinstellungen gespeichert.'; confirmed = true; break; }
       if (result.state === 3) { status.textContent = 'Speichern fehlgeschlagen. Bisheriger Sollwert bleibt aktiv.'; confirmed = true; break; }
     }
     if (!confirmed) status.textContent = 'Speichern noch nicht bestätigt. Bitte neu laden und Wert prüfen.';
@@ -397,7 +405,7 @@ function showTemperatureTrend(key, direction) {
   arrow.className = 'temperature-trend' + (direction === 1 ? ' up' : direction === -1 ? ' down' : '');
   arrow.title = label; arrow.setAttribute('aria-label', label);
 }
-var statusTextKeys = ['troom','taussen','tkessel','tvorlauf','tboiler','tkachelofen','header-clock','brennersperre','regelungsart','betriebsart','gas-day','gas-total','ntp-abweichung','kachelofen-status','uptime','cpu-load','wifi-ssid','wifi-rssi','ota-status','boiler-settings','boiler-delta'];
+var statusTextKeys = ['troom','taussen','tkessel','tvorlauf','tboiler','tkachelofen','header-clock','brennersperre','regelungsart','betriebsart','gas-day','gas-total','ntp-abweichung','kachelofen-status','uptime','cpu-load','wifi-ssid','wifi-rssi','ota-status','recovery-status','boiler-settings','boiler-delta'];
 var sharedStatusPending = false;
 var diagnosticKeys = ['heap-free','heap-min','heap-largest','loop-recent','loop-max','loop-slow'];
 function showDiagnostics(health) {

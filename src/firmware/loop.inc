@@ -12,7 +12,10 @@ void loop(){
   const int operatingMode = requestedOperatingMode;
   requestedOperatingMode = -1;
   portEXIT_CRITICAL(&operatingModeMux);
-  if (operatingMode >= 0) applyOperatingMode(operatingMode);
+  if (operatingMode >= 0) {
+    markLoopPhase(PHASE_MODE_SAVE);
+    applyOperatingMode(operatingMode);
+  }
   portENTER_CRITICAL(&roomSetpointMux);
   const RoomSetpointRequest roomRequest = requestedRoomSetpoints;
   requestedRoomSetpoints.pending = false;
@@ -71,7 +74,7 @@ void loop(){
   requestedFlowLimit.pending = false;
   portEXIT_CRITICAL(&roomSetpointMux);
   if (flowRequest.pending) {
-    const bool saved = saveFlowLimit(flowRequest.value, flowRequest.hasCurve, flowRequest.curve);
+    const bool saved = saveFlowLimit(flowRequest.value, flowRequest.hasCurve, flowRequest.curve, flowRequest.hasRecovery, flowRequest.recovery);
     portENTER_CRITICAL(&roomSetpointMux);
     RoomSaveResult& result = roomSaveResults[flowRequest.id % 8];
     if (result.id == flowRequest.id) result.state = saved ? 2 : 3;
@@ -96,6 +99,7 @@ void loop(){
     updateKachelofenStatus();
   }
   enforceKesselSensorLock();
+  markLoopPhase(PHASE_MIXER);
   updateMischerOffMode();
   updateMischerBoilerMode();
   enforceVorlaufSensorLock();
@@ -110,6 +114,7 @@ void loop(){
   unsigned long currentTime;
   updateKachelofenStatus();
   SetOutPin(); // Enforce pump fault deadlines on every loop pass.
+  markLoopPhase(PHASE_OUTPUTS);
   MischerInit();
   if (UrlaubBetrieb) {
     Urlaubsbetrieb();
@@ -128,11 +133,8 @@ void loop(){
     Betriebsart='0';
     kein_Betrieb();
   }
-  if(connect2wifi){
-    connect2wifi=false;
-    WiFi.disconnect();
-    WiFi.begin(ssid,password);
-  }
+  markLoopPhase(PHASE_NETWORK);
+  serviceWifiReconnect();
   if(connect2mqtt){
     connect2mqtt=false;
     Serial.println("MQTT-Verbindungsversuch");
@@ -148,10 +150,12 @@ void loop(){
   }
   esp_task_wdt_reset(); //watchdog Zeit rücksetzen
   uptime();//um zu wissen, wie lange der Arduino durchläuft
+  markLoopPhase(PHASE_LCD);
   KeyPad();
   Serial_Read();
   currentTime = millis();
   esp_task_wdt_reset(); //watchdog Zeit rücksetzen
+  markLoopPhase(PHASE_SENSOR);
   if(readSensor == false){
     //ds_alt    readTturePt1(tture[bWhichSensor]);//N.B.: Values passed back in globals
     if (bWhichSensor==BOILER_NUMBER){readTturePt1(tture[bWhichSensor]);}
@@ -222,12 +226,6 @@ else {sensorDS1820_read(bWhichSensor);} //ds_neu
       bWhichSensor = 0;
       if(!MenuPage)Serial.print("\n");//Start new line
    }
-   if (currentTime - previousTime_wifi > WIFI_RECON_TIMER && wifiRecon){
-      previousTime_wifi = currentTime;
-      wifiRecon=false;
-      mqttRecon=true;
-      connectToWifi();
-   }
    if (currentTime - previousTime_mqtt > MQTT_RECON_TIMER && mqttRecon){
       previousTime_mqtt = currentTime;
       mqttRecon=false;
@@ -248,7 +246,9 @@ else {sensorDS1820_read(bWhichSensor);} //ds_neu
    timer3_mqttupdate.update();
   esp_task_wdt_reset(); //watchdog Zeit wieder rücksetzen
   updateCpuLoad();
+  markLoopPhase(PHASE_WEB);
   refreshWebStatus();
+  markLoopPhase(PHASE_IDLE);
 }//end of loop()
 
 

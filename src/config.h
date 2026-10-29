@@ -25,8 +25,8 @@
 #define MISCHER_BOILER_ZUFAHRT_MINUTEN 2UL
 // Nach erster Schliessfahrt einmal pruefen; bei fehlender Abkuehlung einmal nachfahren.
 #define MISCHER_BOILER_NACHPRUEFUNG_MINUTEN 10UL
-// Schliessfahrt in AUS erst bei gueltiger Kesseltemperatur <= diesem Wert.
-#define MISCHER_AUS_KESSEL_MAX_TEMP 30.0f
+// Restwaermeabfuhr in AUS bis zu dieser Kesseltemperatur; danach Schliessfahrt.
+#define MISCHER_AUS_KESSEL_MAX_TEMP 35.0f
 #define MISCHER_INIT_TIME_ZU 6000
 #define MISCHER_INIT_TIME_AUF 10000
 #define MISCHER_AUF_PIN 18
@@ -67,8 +67,11 @@
 #define EEADDRESS_KACHELOFEN_AUS 152
 #define EEADDRESS_URLAUB_TEMP 160
 #define EEADDRESS_URLAUB_AKTIV 168
+#define EEADDRESS_RESTWAERME_ZIEL 172
 #define EE_SIZE 176
+static_assert(EEADDRESS_RESTWAERME_ZIEL + sizeof(float) <= EE_SIZE, "Restwaerme-Einstellung ausserhalb EEPROM");
 #define URLAUB_DEFAULT_TEMP 15.0f
+// Heizkreisfreigabe bei Aussentemperaturregelung; Boilerfreigabe bleibt separat.
 #define KESSEL_MIN_TEMP 30.0
 #define WIFI_RECON_TIMER 2000
 #define PUMPENL_HR 18

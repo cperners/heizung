@@ -1,10 +1,12 @@
 void setup() {
+  beginRecoveryDiagnostics();
   beginCpuLoad();
   mqttMessageQueue = xQueueCreate(MQTT_QUEUE_LENGTH, sizeof(PendingMqttMessage));
 
   Serial.begin(BAUD_RATE);
-  esp_task_wdt_init(WDT_TIMEOUT, true); //disable panic so ESP32 restarts
-  esp_task_wdt_add(NULL); //add current thread to WDT watch
+  watchdogInitResult = esp_task_wdt_init(WDT_TIMEOUT, true);
+  watchdogAddResult = esp_task_wdt_add(NULL);
+  watchdogStatusResult = esp_task_wdt_status(NULL);
 
   pinMode(BrennerPin, OUTPUT);
   pinMode(HeizungPin, OUTPUT);
@@ -19,6 +21,7 @@ void setup() {
   initializeStoredSettings();
   EEPROM.get(EEADDRESS_URLAUB_TEMP, tRoomUrlaub);
   EEPROM.get(EEADDRESS_URLAUB_AKTIV, UrlaubBetrieb);
+  EEPROM.get(EEADDRESS_RESTWAERME_ZIEL, restwaermeZielTemp);
   gasStorageReady = gasStorage.begin("gas-meter", false);
   if (gasStorageReady) {
     gasDayBase = gasStorage.getDouble("base", NAN);
@@ -298,6 +301,17 @@ void setup() {
         request->send(400, "text/plain", "Ungueltige Kurvensteilheit (0.1 bis 10)"); return;
       }
     }
+    const bool hasRecovery = request->hasParam("restwaerme", true);
+    float recovery = 0;
+    if (hasRecovery) {
+      const String text = request->getParam("restwaerme", true)->value();
+      char* end = nullptr;
+      recovery = strtof(text.c_str(), &end);
+      if (text.length() > 16 || end == text.c_str() || *end != '\0' ||
+          !isfinite(recovery) || recovery < 30 || recovery > 40) {
+        request->send(400, "text/plain", "Ungueltige Restwaerme-Zieltemperatur (30 bis 40 Grad)"); return;
+      }
+    }
     uint32_t id = 0;
     portENTER_CRITICAL(&roomSetpointMux);
     if (!requestedFlowLimit.pending) {
@@ -307,7 +321,7 @@ void setup() {
       if (result.state != 1) {
         nextRoomSaveId = id = candidate;
         result = {id, 1};
-        requestedFlowLimit = {true, value, id, hasCurve, curve};
+        requestedFlowLimit = {true, value, id, hasCurve, curve, hasRecovery, recovery};
       }
     }
     portEXIT_CRITICAL(&roomSetpointMux);

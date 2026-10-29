@@ -30,63 +30,81 @@ bool mischerOffMode = false;
 unsigned long mischerOffStarted = 0;
 bool mischerOffFinished = false;
 bool mischerOffClosing = false;
-static_assert(MISCHER_AUS_KESSEL_MAX_TEMP >= -55.0f && MISCHER_AUS_KESSEL_MAX_TEMP <= 125.0f,
+static_assert(MISCHER_AUS_KESSEL_MAX_TEMP >= 30.0f && MISCHER_AUS_KESSEL_MAX_TEMP <= 40.0f,
               "Mischer-AUS-Kesseltemperatur ausserhalb des Sensorbereichs");
 static_assert(MISCHER_AUS_ZUFAHRT_MINUTEN <= 0xFFFFFFFFUL / 60000UL,
               "Mischer-AUS-Zeit ist zu gross");
 constexpr unsigned long MISCHER_OFF_CLOSE_MS = MISCHER_AUS_ZUFAHRT_MINUTEN * 60000UL;
 
 void updateMischerOffMode() {
-  const bool off = !WinterBetrieb && !BoilerBetrieb && !NurHeizung;
+  const bool off = !UrlaubBetrieb && !WinterBetrieb && !BoilerBetrieb && !NurHeizung;
   if (!off) {
     if (mischerOffMode) {
-      // Cancel an unfinished off run before normal initialization resumes.
       digitalWrite(MischerAuf_Pin, LOW);
       digitalWrite(MischerZu_Pin, LOW);
       MischerAufRelais = MischerZuRelais = false;
       mischerOffMode = false;
       mischerOffClosing = false;
     }
+    offHeatRecoveryActive = false;
     return;
   }
+  // Never allow retained heat demands to re-enable the burner in AUS.
+  BrennerRelais = false;
+  digitalWrite(BrennerPin, LOW);
   if (!mischerOffMode) {
     mischerOffMode = true;
     mischerOffFinished = false;
     mischerOffClosing = false;
+    offHeatRecoveryActive = false;
     vorlaufFaultOpening = false;
     mischer_wait = mischer_drive = 0;
     mischer_init_laeuft = mischer_init_auf = mischer_init_zu = false;
     previousTime_MischerInit = 0;
-    Serial.println("Betriebsart AUS: Mischer wartet auf abgekuehlten Kessel");
+    digitalWrite(MischerAuf_Pin, LOW);
+    digitalWrite(MischerZu_Pin, LOW);
+    MischerAufRelais = MischerZuRelais = false;
+  }
+  const bool cool = sensorIsUsable(0) && isfinite(tKessel) &&
+                    tKessel <= restwaermeZielTemp;
+  if (!cool) {
+    if (!offHeatRecoveryActive) {
+      // Restart regulated heat removal if the boiler warms again during AUS.
+      digitalWrite(MischerAuf_Pin, LOW);
+      digitalWrite(MischerZu_Pin, LOW);
+      MischerAufRelais = MischerZuRelais = false;
+      mischer_wait = mischer_drive = 0;
+      Serial.println("AUS: geregelte Restwaermeabfuhr, Brenner gesperrt");
+    }
+    offHeatRecoveryActive = true;
+    mischerOffClosing = false;
+    mischerOffFinished = false;
+    return; // kein_Betrieb regulates the heating circuit, never the burner.
+  }
+  if (offHeatRecoveryActive) {
+    offHeatRecoveryActive = false;
+    vorlaufFaultOpening = false;
+    mischer_wait = mischer_drive = 0;
+    Serial.println("AUS: Restwaermeziel erreicht, Mischer schliessen");
   }
   const unsigned long now = millis();
   if (mischerOffClosing && (unsigned long)(now - mischerOffStarted) >= MISCHER_OFF_CLOSE_MS) {
     mischerOffFinished = true;
     mischerOffClosing = false;
-    Serial.println("Betriebsart AUS: Mischer-Schliessfahrt beendet, beide Ausgaenge aus");
   }
-  const bool cool = sensorIsUsable(0) && isfinite(tKessel) &&
-                    tKessel <= MISCHER_AUS_KESSEL_MAX_TEMP;
-  if (!cool) {
-    if (mischerOffClosing)
-      Serial.println("Betriebsart AUS: Schliessfahrt unterbrochen, Kessel warm oder ungueltig");
-    mischerOffClosing = false;
-  } else if (!mischerOffFinished && !mischerOffClosing) {
+  if (!mischerOffFinished && !mischerOffClosing) {
     mischerOffStarted = now;
     mischerOffClosing = MISCHER_OFF_CLOSE_MS != 0;
     mischerOffFinished = MISCHER_OFF_CLOSE_MS == 0;
-    Serial.println("Betriebsart AUS: Kessel abgekuehlt, Mischer-Schliessfahrt startet");
   }
-  const bool closing = mischerOffClosing;
-  // AUS overrides initialization, normal regulation and sensor-fault opening.
   digitalWrite(MischerAuf_Pin, LOW);
   MischerAufRelais = false;
-  digitalWrite(MischerZu_Pin, closing ? HIGH : LOW);
-  MischerZuRelais = closing;
+  digitalWrite(MischerZu_Pin, mischerOffClosing ? HIGH : LOW);
+  MischerZuRelais = mischerOffClosing;
 }
 
 bool enforceVorlaufSensorLock() {
-  if (mischerOffMode) return true;
+  if (mischerOffMode && !offHeatRecoveryActive) return true;
   const bool locked = !sensorIsUsable(1);
   static bool faultActive = false;
   if (!locked) {
@@ -197,7 +215,7 @@ void updateMischerBoilerMode() {
 
 void MischerInit(){
   if (enforceVorlaufSensorLock()) return;
-  if (mischerBoilerMode) return;
+  if (mischerBoilerMode || mischerOffMode) return;
   unsigned long currentTime0;
   if(!mischer_init_auf && !mischer_init_laeuft && !mischer_init_zu){
    mischer_init_laeuft=true;

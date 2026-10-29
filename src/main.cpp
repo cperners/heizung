@@ -18,6 +18,7 @@ https://github.com/fedorweems/YouTube/blob/Arduino-Game-V1/ESP8266%20Home%20Auto
 #include <WiFi.h>
 #include <esp_task_wdt.h>
 #include <esp_timer.h>
+#include <esp_system.h>
 #include <esp_heap_caps.h>
 #include <WiFiUdp.h>
 #include <sys/time.h>

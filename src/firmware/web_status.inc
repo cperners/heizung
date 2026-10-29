@@ -1,4 +1,4 @@
-constexpr size_t WEB_STATUS_CAPACITY = 3072;
+constexpr size_t WEB_STATUS_CAPACITY = 4096;
 char webStatusCache[WEB_STATUS_CAPACITY] = {};
 size_t webStatusLength = 0;
 portMUX_TYPE webStatusMux = portMUX_INITIALIZER_UNLOCKED;
@@ -38,6 +38,7 @@ void refreshWebStatus() {
   static JsonDocument doc;
   if (doc.overflowed()) doc.clear();
   addRuntimeDiagnostics(doc);
+  addRecoveryDiagnostics(doc);
   addOtaDiagnostics(doc);
   doc["generation"] = ++generation;
   JsonObject values = doc["values"].to<JsonObject>();
@@ -68,11 +69,12 @@ void refreshWebStatus() {
   values["uptime"] = uptimeText;
   values["cpu-load"] = cpuLoadDisplay();
   values["ota-status"] = otaDiagnosticDisplay();
+  values["recovery-status"] = recoveryDiagnosticDisplay();
   values["wifi-ssid"] = ssid;
   values["wifi-rssi"] = String(WiFi.RSSI());
   values["brennersperre"] = sensorIsUsable(0) ? "Kesselsensor OK - keine Sensorsperre" : "BRENNER GESPERRT - Kesselsensor ungueltig";
-  values["regelungsart"] = UrlaubBetrieb ? "URLAUB / RAUMTEMPERATUR" : regelungsModus == REGELUNG_AUTO ? (AussentemperaturRegelung ? "AUTO / AUSSENTEMPERATUR" : "AUTO / RAUMTEMPERATUR") : (regelungsModus == REGELUNG_RAUM ? "MANUELL / RAUMTEMPERATUR" : "MANUELL / AUSSENTEMPERATUR");
-  values["betriebsart"] = UrlaubBetrieb ? "URLAUBSBETRIEB" : WinterBetrieb ? "AUTOMATIKBETRIEB" : BoilerBetrieb ? "NUR BOILER" : NurHeizung ? "NUR HEIZUNG" : "AUS";
+  values["regelungsart"] = offHeatRecoveryActive ? "RESTWAERME / HEIZKURVE" : UrlaubBetrieb ? "URLAUB / RAUMTEMPERATUR" : regelungsModus == REGELUNG_AUTO ? (AussentemperaturRegelung ? "AUTO / AUSSENTEMPERATUR" : "AUTO / RAUMTEMPERATUR") : (regelungsModus == REGELUNG_RAUM ? "MANUELL / RAUMTEMPERATUR" : "MANUELL / AUSSENTEMPERATUR");
+  values["betriebsart"] = offHeatRecoveryActive ? "AUS / RESTWAERME" : UrlaubBetrieb ? "URLAUBSBETRIEB" : WinterBetrieb ? "AUTOMATIKBETRIEB" : BoilerBetrieb ? "NUR BOILER" : NurHeizung ? "NUR HEIZUNG" : "AUS";
   values["gas-day"] = gasDisplay(true);
   values["gas-total"] = gasDisplay(false);
   values["ntp-abweichung"] = ntpProbeDisplay();

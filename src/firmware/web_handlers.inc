@@ -102,6 +102,8 @@ String processor(const String& var){
     return String(tBoilerDiff, 1);
   }else if(var == "VORLAUFMAX"){
     return String(tvmax, 1);
+  }else if(var == "RESTWAERMEZIEL"){
+    return String(restwaermeZielTemp, 1);
   }else if(var == "KURVENSTEILHEIT"){
     return String(n, 1);
   }else if(var == "BOILERDELTA"){
@@ -115,6 +117,7 @@ String processor(const String& var){
   }else if(var == "KACHELOFENSTATUS"){
     return kachelofenAktiv ? "AKTIV" : "INAKTIV";
   }else if(var == "BETRIEBSART"){
+    if (offHeatRecoveryActive) return "AUS / RESTWAERME";
     return UrlaubBetrieb ? "URLAUBSBETRIEB" : WinterBetrieb ? "AUTOMATIKBETRIEB" : BoilerBetrieb ? "NUR BOILER" : NurHeizung ? "NUR HEIZUNG" : "AUS";
   }else if(var == "BETRIEBAUTO"){
     return WinterBetrieb ? "selected" : "";
@@ -145,6 +148,7 @@ String processor(const String& var){
   }else if(var == "MODEAUSSEN"){
     return regelungsModus == REGELUNG_AUSSEN ? "selected" : "";
   }else if(var == "REGELUNGSART"){
+    if (offHeatRecoveryActive) return "RESTWAERME / HEIZKURVE";
     if (UrlaubBetrieb) return "URLAUB / RAUMTEMPERATUR";
     if(regelungsModus == REGELUNG_AUTO){
       return AussentemperaturRegelung ? "AUTO / AUSSENTEMPERATUR" : "AUTO / RAUMTEMPERATUR";

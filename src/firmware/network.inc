@@ -1,17 +1,24 @@
-void WiFiEvent(WiFiEvent_t event) {
+void WiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
     Serial.printf("[WiFi-event] event: %d\n", event);
     switch(event) {
     case SYSTEM_EVENT_STA_GOT_IP:
         Serial.println("WiFi connected");
         Serial.println("IP address: ");
         Serial.println(WiFi.localIP());
+        portENTER_CRITICAL(&wifiReconnectMux);
+        wifiRecon = false;
+        portEXIT_CRITICAL(&wifiReconnectMux);
         connectToMqtt();
         break;
     case SYSTEM_EVENT_STA_DISCONNECTED:
         Serial.println("WiFi lost connection");
-        wifiRecon=true;
-        mqttRecon=false;
-        previousTime_wifi=millis();
+        portENTER_CRITICAL(&wifiReconnectMux);
+        ++wifiDisconnectCount;
+        wifiLastDisconnectReason = info.wifi_sta_disconnected.reason;
+        wifiRecon = true;
+        previousTime_wifi = millis();
+        portEXIT_CRITICAL(&wifiReconnectMux);
+        mqttRecon = false;
         break;
     case SYSTEM_EVENT_WIFI_READY: 
         break;
@@ -26,9 +33,8 @@ void WiFiEvent(WiFiEvent_t event) {
     case SYSTEM_EVENT_STA_AUTHMODE_CHANGE:
         break;
     case SYSTEM_EVENT_STA_LOST_IP:
-        wifiRecon=true;
+        connectToWifi();
         mqttRecon=false;
-        previousTime_wifi=millis();
         break;
     case SYSTEM_EVENT_STA_WPS_ER_SUCCESS:
         break;
@@ -83,10 +89,11 @@ void mqttupdate() {
   String bez;
   char msg[50];
   char line0[48];
-  char buffer[2048];
+  char buffer[3072];
   static JsonDocument doc;
   if (doc.overflowed()) doc.clear();
   addRuntimeDiagnostics(doc);
+  addRecoveryDiagnostics(doc);
   addOtaDiagnostics(doc);
   doc["S0Kessel"].set(tKessel);
   doc["S1Vorlauf"].set(tVorlauf);
@@ -128,6 +135,8 @@ void mqttupdate() {
     default: break;
   }
   doc["atRegelung"].set(mqttRegelungsArt);
+  doc["restwaermeAktiv"] = offHeatRecoveryActive;
+  doc["restwaermeZieltemperatur"] = restwaermeZielTemp;
   doc["urlaubAktiv"] = UrlaubBetrieb != 0;
   doc["urlaubTemperatur"] = tRoomUrlaub;
   doc["PumpenNachlauf"].set(PumpenNachlauf);
@@ -314,7 +323,10 @@ void mqttupdate() {
 ******************************************************************************************************* */
 void connectToWifi() {
   //WiFi.begin(SECRET_SSID, SECRET_PASS);
-  connect2wifi=true;
+  portENTER_CRITICAL(&wifiReconnectMux);
+  wifiRecon = true;
+  previousTime_wifi = millis();
+  portEXIT_CRITICAL(&wifiReconnectMux);
 }
 
 void connect() {

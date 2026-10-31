@@ -164,7 +164,10 @@ bool sensorIsUsable(byte index) {
 
 // Status bei Aenderung und nach Wiederverbindung erneut senden.
 void publishSensorStates() {
+  if (mqttSettingsAreChanging()) return;
   static bool published[5] = {};
+  static uint32_t publishedGeneration=0;
+  if (publishedGeneration!=mqttTopicGeneration) { memset(published,0,sizeof(published)); publishedGeneration=mqttTopicGeneration; }
   static bool lastValid[5] = {};
   static float lastTemperature[5] = {};
   static unsigned long lastAttempt = 0;
@@ -201,7 +204,10 @@ void publishSensorStates() {
 }
 
 void publishBrennerSensorLock() {
+  if (mqttSettingsAreChanging()) return;
   static bool published = false;
+  static uint32_t publishedGeneration=0;
+  if (publishedGeneration!=mqttTopicGeneration) { published=false; publishedGeneration=mqttTopicGeneration; }
   static bool lastLocked = false;
   static unsigned long lastAttempt = 0;
   if (!asyncMqttClient.connected()) { published = false; return; }

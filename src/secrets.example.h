@@ -12,3 +12,8 @@
 #define MQTT_HOST IPAddress(192, 168, 0, 1)
 #define MQTT_PORT 1883
 #define MQTT_TEXT "/SmartHome/Beispiel/Heizung/"
+
+// Eigene Web-Anmeldung lokal in secrets.h eintragen (Passwort 1 bis 64 UTF-8-Bytes).
+// Keine realen Zugangsdaten in Git aufnehmen.
+#define HEIZUNG_WEB_USER "BENUTZER"
+#define HEIZUNG_WEB_PASSWORD "AENDERN"

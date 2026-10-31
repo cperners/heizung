@@ -284,8 +284,12 @@ void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties 
     Serial.println("MQTT: ungueltige oder aufgeteilte Nachricht verworfen");
     return;
   }
-  if (strcmp(topic, MQTT_TEXT "set") != 0 &&
-      strcmp(topic, KACHELOFEN_MQTT_TOPIC) != 0 && strcmp(topic, GAS_MQTT_TOPIC) != 0) return;
+  bool acceptedTopic;
+  portENTER_CRITICAL(&mqttSettingsMux);
+  acceptedTopic = !mqttSettingsChanging && (strcmp(topic, mqttControlTopic) == 0 ||
+      strcmp(topic, KACHELOFEN_MQTT_TOPIC) == 0 || strcmp(topic, GAS_MQTT_TOPIC) == 0);
+  portEXIT_CRITICAL(&mqttSettingsMux);
+  if (!acceptedTopic) return;
   const size_t topicLength = strnlen(topic, 128);
   if (topicLength >= 128) return;
   PendingMqttMessage message{};
@@ -325,26 +329,31 @@ void processMqttMessages() {
 /* *******************************************************************************************************
                                          mqtt reconnect
 ******************************************************************************************************* */
+void subscribeActiveMqttTopics() {
+  char control[128], stove[128], gas[128]; bool changing;
+  portENTER_CRITICAL(&mqttSettingsMux);
+  changing=mqttSettingsChanging;
+  memcpy(control,mqttControlTopic,sizeof(control));
+  memcpy(stove,KACHELOFEN_MQTT_TOPIC,sizeof(stove));
+  memcpy(gas,GAS_MQTT_TOPIC,sizeof(gas));
+  portEXIT_CRITICAL(&mqttSettingsMux);
+  if (changing) return;
+  asyncMqttClient.subscribe(control,1);
+  asyncMqttClient.subscribe(stove,1);
+  asyncMqttClient.subscribe(gas,1);
+}
+
 void onMqttConnect(bool sessionPresent) {
-      const String subsc = String(MQTT_TEXT) + "set";
-      Serial.println("connect to MQTT\n");
-      Serial.print("Session present: ");
-      Serial.println(sessionPresent);
-      asyncMqttClient.subscribe(subsc.c_str(),1);
-      asyncMqttClient.subscribe(KACHELOFEN_MQTT_TOPIC,1);
-      asyncMqttClient.subscribe(GAS_MQTT_TOPIC,1);
-      //uint16_t packetIdSub = asyncMqttClient.subscribe("/SmartHome/Keller/Heizung/setRaumTemp", 2);
+  portENTER_CRITICAL(&mqttSettingsMux); mqttTransportIdle=false; portEXIT_CRITICAL(&mqttSettingsMux);
+  subscribeActiveMqttTopics();
 }
 
 void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
-  Serial.printf("MQTT-Abbruchgrund: %u\n",
-              static_cast<unsigned>(reason));
-  if (!WiFi.isConnected()){
-    WiFi.disconnect();
-    WiFi.begin(ssid,password);
-  }
-        mqttRecon=true;
-        previousTime_mqtt=millis();
+  portENTER_CRITICAL(&mqttSettingsMux);
+  mqttTransportIdle=true;
+  portEXIT_CRITICAL(&mqttSettingsMux);
+  // Keine WLAN-Treiberaufrufe im MQTT-Callback: der Hauptloop besitzt Wiederanlaeufe.
+  mqttRecon=true; previousTime_mqtt=millis();
 }
 /* *******************************************************************************************************
                                          print LCD Values

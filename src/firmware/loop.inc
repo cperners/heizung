@@ -6,7 +6,9 @@ void loop(){
   }
   ElegantOTA.loop();
   updateOtaDiagnostics();
-  processMqttMessages();
+  serviceWebPasswordChange();
+  serviceMqttSettings();
+  if (!mqttSettingsAreChanging()) processMqttMessages();
   processGasReading();
   portENTER_CRITICAL(&operatingModeMux);
   const int operatingMode = requestedOperatingMode;
@@ -135,10 +137,12 @@ void loop(){
     kein_Betrieb();
   }
   markLoopPhase(PHASE_NETWORK);
-  serviceWifiReconnect();
-  if(connect2mqtt){
+  serviceWifiSettings();
+  if (!wifiTrialInProgress()) serviceWifiReconnect();
+  if(connect2mqtt && !mqttSettingsAreChanging() && !wifiTrialInProgress()){
     connect2mqtt=false;
     Serial.println("MQTT-Verbindungsversuch");
+    portENTER_CRITICAL(&mqttSettingsMux); mqttTransportIdle=false; portEXIT_CRITICAL(&mqttSettingsMux);
     asyncMqttClient.connect();
   }
   if(set2myuhr){

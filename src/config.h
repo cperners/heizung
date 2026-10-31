@@ -5,6 +5,15 @@
 #include <IPAddress.h>
 #include "secrets.h"
 
+// Ohne lokal konfigurierte Anmeldung bleiben geschuetzte Aenderungen gesperrt.
+#ifndef HEIZUNG_WEB_USER
+#define HEIZUNG_WEB_USER ""
+#endif
+#ifndef HEIZUNG_WEB_PASSWORD
+#define HEIZUNG_WEB_PASSWORD ""
+#endif
+static_assert(sizeof(HEIZUNG_WEB_USER) > 1 && sizeof(HEIZUNG_WEB_PASSWORD) > 1, "Web-Anmeldung lokal in secrets.h konfigurieren");
+static_assert(sizeof(HEIZUNG_WEB_PASSWORD) <= 65, "Anmeldepasswort maximal 64 Bytes");
 #define EXMISCHER
 #define WDT_TIMEOUT 200
 

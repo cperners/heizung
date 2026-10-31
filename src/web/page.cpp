@@ -78,6 +78,12 @@ form { line-height: 2; font-size: .9rem; }
 #mixer-symbol { width: 32px; height: 32px; color: #929ba1; vertical-align: middle; }
 #mixer-symbol.moving { color: #69a886; }
 .mixer-status { font-size: .9rem; color: #607681; }
+fieldset.protected-settings { border:0; padding:0; margin:0; min-width:0; }
+fieldset:disabled button { opacity:.45; cursor:default; }
+#web-access { max-width:1120px; margin:12px auto; padding:0 24px; }
+#web-access form { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+#web-access input, #wifi-settings input, #mqtt-settings input, #password-settings input { max-width:100%; padding:8px; border:1px solid #bdcdd3; border-radius:7px; font:inherit; }
+[hidden] { display:none !important; }
 </style>
 <title>ESP32 Heizungs-Server</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -88,6 +94,15 @@ form { line-height: 2; font-size: .9rem; }
 <body>
   <div class="topnav">
     <h1><span>ESP32 Heizung</span><span style="font-size:.65em;color:#fef08a;">Laufzeit: <span id="uptime">--</span></span><span style="font-size:.65em;color:#fef08a;" title="Anteil der Ticks ohne Leerlauf, keine exakte CPU-Zeitmessung">CPU-Sch&auml;tzung: <span id="cpu-load">--</span></span><time id="header-clock">%WEBTIME%</time></h1>
+  </div>
+  <div id="web-access">
+    <p id="access-status" role="status">Werte sichtbar. Zum &Auml;ndern der Einstellungen bitte anmelden.</p>
+    <form id="web-login" autocomplete="on">
+      <label>Benutzer <input name="benutzer" autocomplete="username" maxlength="32" required></label>
+      <label>Passwort <input name="passwort" type="password" autocomplete="current-password" maxlength="64" required></label>
+      <button class="button" type="submit">Anmelden</button>
+    </form>
+    <button class="button" id="web-logout" type="button" hidden>Abmelden</button>
   </div>
   <section class="layout">
   <div>
@@ -129,7 +144,7 @@ form { line-height: 2; font-size: .9rem; }
       <svg id="mixer-symbol" viewBox="0 0 32 32" role="img" aria-label="Mischerstatus wird geladen"><title>Mischerstatus wird geladen</title><g fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M2 13h7m14 0h7M16 20v10M1 9v8m30-8v8M12 31h8"/><path d="m9 7 14 12V7L9 19ZM16 13v7M16 7V2m-5 0h10"/></g></svg>
       <span id="mixer-direction">Wird geladen</span>
     </div>
-    <form id="flow-limit" class="threshold-form" action="/vorlaufmaximum" method="post">
+    <form id="flow-limit" class="threshold-form" action="/vorlaufmaximum" method="post"><fieldset class="protected-settings" disabled>
       <label for="flow-max">Maximale Vorlauftemperatur</label>
       <div class="threshold-row">
         <button type="button" aria-label="Maximale Vorlauftemperatur senken" onclick="document.getElementById('flow-max').stepDown()">&minus;</button>
@@ -152,7 +167,7 @@ form { line-height: 2; font-size: .9rem; }
       <small>Bis zu dieser Kesseltemperatur wird bei Aus Restw&auml;rme geregelt abgef&uuml;hrt. Standard: 35 &deg;C.</small>
       <p id="flow-save-status" class="threshold-hint" role="status">&Auml;nderungen erst mit Speichern &uuml;bernehmen.</p>
       <button id="flow-save" class="threshold-save" type="submit">Vorlaufeinstellungen speichern</button>
-    </form>
+    </fieldset></form>
   </div>
   <div>
     <span class="dht-labels">Boiler</span> 
@@ -163,7 +178,7 @@ form { line-height: 2; font-size: .9rem; }
     </div>
     <div class="equipment-status"><svg id="boiler-pump-icon" viewBox="0 0 24 24" role="img" aria-label="Boilerpumpenstatus wird geladen"><title>Boilerpumpenstatus wird geladen</title><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M2 10h4m12 4h4M2 8v4m20 0v4M8 19l-1 3h10l-1-3"/><circle cx="12" cy="12" r="7"/></g><path fill="currentColor" d="M10 8l6 4-6 4Z"/></svg></div>
     <p style="font-size:.9rem;">Differenz Kessel &minus; Boiler: <span id="boiler-delta">%BOILERDELTA%</span></p>
-    <form id="boiler-setpoint" class="threshold-form" action="/boilertemperatur" method="post">
+    <form id="boiler-setpoint" class="threshold-form" action="/boilertemperatur" method="post"><fieldset class="protected-settings" disabled>
       <label for="boiler-soll">Boiler-Solltemperatur</label>
       <div class="threshold-row">
         <button type="button" aria-label="Boiler-Solltemperatur senken" onclick="document.getElementById('boiler-soll').stepDown()">&minus;</button>
@@ -178,7 +193,7 @@ form { line-height: 2; font-size: .9rem; }
       </div>
       <p id="boiler-save-status" class="threshold-hint" role="status">&Auml;nderungen erst mit Speichern &uuml;bernehmen.</p>
       <button id="boiler-save" class="threshold-save" type="submit">Boilereinstellungen speichern</button>
-    </form>
+    </fieldset></form>
     <p id="boiler-settings" style="font-size:.8rem;color:#607681;">%BOILERINFO%</p>
   </div>
   <p>
@@ -228,7 +243,7 @@ form { line-height: 2; font-size: .9rem; }
   <section class="layout">
   <div class="threshold-card">
     <h3>Wunschraumtemperatur</h3>
-    <form id="room-setpoints" class="threshold-form" action="/raumtemperaturen" method="post">
+    <form id="room-setpoints" class="threshold-form" action="/raumtemperaturen" method="post"><fieldset class="protected-settings" disabled>
       <label for="room-tag">Tag</label>
       <div class="threshold-row">
         <button type="button" aria-label="Tagtemperatur senken" onclick="document.getElementById('room-tag').stepDown()">&minus;</button>
@@ -255,7 +270,7 @@ form { line-height: 2; font-size: .9rem; }
       <small>Tagbeginn muss vor Nachtbeginn liegen.</small>
       <p id="room-save-status" class="threshold-hint" role="status">&Auml;nderungen werden erst mit Speichern &uuml;bernommen.</p>
       <button id="room-save" class="threshold-save" type="submit">Temperaturen und Zeiten speichern</button>
-    </form>
+    </fieldset></form>
   </div>
   <div>
     <span class="dht-labels">Kachelofen</span>
@@ -264,7 +279,7 @@ form { line-height: 2; font-size: .9rem; }
   </div>
   <div>Kachelofen: <strong id="kachelofen-status">%KACHELOFENSTATUS%</strong></div>
   <div class="threshold-card">
-    <form class="threshold-form" action="/kachelofen" method="get">
+    <form id="stove-settings" class="threshold-form" action="/kachelofen" method="post"><fieldset class="protected-settings" disabled>
   <h3>Kachelofen-Schaltschwellen</h3>
   <label for="threshold-ein">Aktiv ab</label>
   <div class="threshold-row">
@@ -280,7 +295,7 @@ form { line-height: 2; font-size: .9rem; }
   </div>
   <p class="threshold-hint" id="threshold-hint" aria-live="polite">Änderungen werden erst mit Speichern übernommen.</p>
   <button class="threshold-save" id="threshold-save" type="submit">Schaltschwellen speichern</button>
-</form>
+</fieldset></form>
 <script>
 function adjustThreshold(id, direction) {
   const field = document.getElementById(id);
@@ -304,6 +319,43 @@ function adjustThreshold(id, direction) {
   <div><h3>WLAN</h3>
     <p>Netzwerk: <span id="wifi-ssid">%WIFISSID%</span><br>
     Signalst&auml;rke: <span id="wifi-rssi">%WIFIRSSI%</span> dBm</p>
+    <form id="wifi-settings" class="threshold-form">
+      <fieldset class="protected-settings" disabled>
+        <label>Neuer WLAN-Name <input name="ssid" autocomplete="off" maxlength="32" required></label>
+        <label>Neues WLAN-Passwort <input name="passwort" type="password" autocomplete="new-password" minlength="8" maxlength="63" required></label>
+        <p class="threshold-hint">Beim Wechsel kann diese Seite kurz unerreichbar sein. Bei fehlgeschlagener Verbindung werden die bisherigen Daten wieder verwendet. In einem anderen Netz kann sich die IP-Adresse &auml;ndern.</p>
+        <button class="threshold-save" type="submit">WLAN testen und speichern</button>
+      </fieldset>
+      <p class="threshold-hint" id="wifi-save-status" role="status"></p>
+    </form>
+  </div>
+  <div><h3>MQTT</h3>
+    <p id="mqtt-current">Einstellungen werden geladen.</p>
+    <form id="mqtt-settings" class="threshold-form">
+      <fieldset class="protected-settings" disabled>
+        <label>Server (IP oder Name) <input name="server" maxlength="63" required autocomplete="off"></label>
+        <label>Port <input name="port" type="number" min="1" max="65535" step="1" required></label>
+        <label>Gemeinsamer Basispfad <input name="basis" maxlength="80" required autocomplete="off"></label>
+        <label>MQTT-Benutzername (optional) <input name="benutzer" maxlength="63" autocomplete="off"></label>
+        <label>MQTT-Passwort (optional) <input name="passwort" type="password" maxlength="127" autocomplete="new-password"></label>
+        <label><input name="passwortbehalten" type="checkbox" value="1"> Gespeichertes MQTT-Passwort beibehalten, wenn kein neues eingegeben wird</label>
+        <p class="threshold-hint">Alle Heizungs-Themen werden gemeinsam umgestellt. Ohne Benutzername und Passwort wird keine Broker-Anmeldung verwendet. Verbindung wird vor dem Speichern getestet.</p>
+        <button class="threshold-save" type="submit">MQTT testen und speichern</button>
+      </fieldset>
+      <p id="mqtt-save-status" class="threshold-hint" role="status"></p>
+    </form>
+  </div>
+  <div><h3>Anmeldepasswort &auml;ndern</h3>
+    <form id="password-settings" class="threshold-form">
+      <fieldset class="protected-settings" disabled>
+        <label>Bisheriges Passwort <input name="alt" type="password" maxlength="64" required autocomplete="current-password"></label>
+        <label>Neues Passwort <input name="neu" type="password" maxlength="64" required autocomplete="new-password"></label>
+        <label>Neues Passwort wiederholen <input name="wiederholen" type="password" maxlength="64" required autocomplete="new-password"></label>
+        <p class="threshold-hint">Bis zu 64 Zeichen (maximal 64 UTF-8-Bytes). Nach dem Speichern werden alle Web-Sitzungen abgemeldet. Die Update-Seite ist davon ausgenommen.</p>
+        <button class="threshold-save" type="submit">Anmeldepasswort speichern</button>
+      </fieldset>
+      <p id="password-save-status" class="threshold-hint" role="status"></p>
+    </form>
   </div>
   <div><h3>Systemdiagnose</h3>
     <p>Speicher frei: <span id="heap-free">--</span><br>
@@ -319,12 +371,115 @@ function adjustThreshold(id, direction) {
   </section>
   <p>
 <script>
+var webToken = '';
+try { webToken = sessionStorage.getItem('heizung-session') || ''; } catch (_) {}
+function setWebAccess(allowed) {
+  document.querySelectorAll('fieldset.protected-settings').forEach(function(field) { field.disabled = !allowed; });
+  document.getElementById('web-login').hidden = allowed;
+  document.getElementById('web-logout').hidden = !allowed;
+  document.getElementById('access-status').textContent = allowed
+    ? 'Angemeldet. Einstellungen freigegeben; Abmeldung nach 15 Minuten ohne geschuetzte Anfrage.'
+    : 'Werte sichtbar. Zum Aendern der Einstellungen bitte anmelden.';
+  if (!allowed) { webToken = ''; try { sessionStorage.removeItem('heizung-session'); } catch (_) {} }
+}
+async function checkWebAccess() {
+  if (!webToken) { setWebAccess(false); return; }
+  try { var state = await roomSaveRequest('/anmeldung-status', 'GET'); setWebAccess(state.angemeldet === true); }
+  catch (_) {
+    document.querySelectorAll('fieldset.protected-settings').forEach(function(field) { field.disabled = true; });
+    document.getElementById('access-status').textContent = 'Verbindung unterbrochen. Einstellungen bis zur erneuten Pruefung gesperrt.';
+  }
+}
+document.getElementById('web-login').addEventListener('submit', async function(event) {
+  event.preventDefault();
+  try {
+    var body = new URLSearchParams(new FormData(event.target)).toString();
+    var state = await roomSaveRequest('/anmeldung', 'POST', body);
+    webToken = state.token;
+    try { sessionStorage.setItem('heizung-session', webToken); } catch (_) {}
+    event.target.elements.passwort.value = '';
+    setWebAccess(true);
+  } catch (error) { document.getElementById('access-status').textContent = error.message; }
+});
+document.getElementById('web-logout').addEventListener('click', async function() {
+  try { await roomSaveRequest('/abmelden', 'POST'); } finally { setWebAccess(false); }
+});
+document.getElementById('stove-settings').addEventListener('submit', async function(event) {
+  event.preventDefault();
+  try {
+    await roomSaveRequest('/kachelofen','POST',new URLSearchParams(new FormData(event.target)).toString());
+    document.getElementById('threshold-hint').textContent = 'Zur Uebernahme vorgemerkt.';
+  } catch (error) { document.getElementById('threshold-hint').textContent = error.message; }
+});
+document.getElementById('wifi-settings').addEventListener('submit', async function(event) {
+  event.preventDefault();
+  var form=event.target, status=document.getElementById('wifi-save-status');
+  try {
+    await roomSaveRequest('/wlan','POST',new URLSearchParams(new FormData(form)).toString());
+    form.elements.passwort.value='';
+    status.textContent='WLAN-Wechsel gestartet. Bei Bedarf mit dem neuen Netz verbinden und die neue ESP-Adresse oeffnen.';
+    for (var i=0;i<24;++i) {
+      await new Promise(function(done){setTimeout(done,2500);});
+      try {
+        var state=await roomSaveRequest('/wlan-status','GET');
+        if (state.state===2) { status.textContent='Neues WLAN verbunden und gespeichert.'; return; }
+        if (state.state===3 || state.state===4) { status.textContent='Wechsel nicht gespeichert. Bisherige WLAN-Daten bleiben aktiv.'; return; }
+      } catch (_) {}
+    }
+    status.textContent='Verbindung unterbrochen oder neue Adresse. Bitte Erreichbarkeit pruefen; Speichern noch nicht bestaetigt.';
+  } catch(error) { status.textContent=error.message; }
+});
+async function loadMqttForm() {
+  try {
+    var settings=await roomSaveRequest('/mqtt-einstellungen','GET');
+    document.getElementById('mqtt-current').textContent='Server: '+settings.server+':'+settings.port+'; Basispfad: '+settings.basis;
+    var form=document.getElementById('mqtt-settings');
+    form.elements.server.value=settings.server; form.elements.port.value=settings.port; form.elements.basis.value=settings.basis;
+    form.elements.benutzer.value=settings.benutzer || '';
+    form.elements.passwort.value=''; form.elements.passwortbehalten.checked=settings.passwortGesetzt===true;
+  } catch (_) { document.getElementById('mqtt-current').textContent='MQTT-Einstellungen derzeit nicht erreichbar.'; }
+}
+document.getElementById('mqtt-settings').addEventListener('submit',async function(event) {
+  event.preventDefault();var status=document.getElementById('mqtt-save-status');
+  try {
+    await roomSaveRequest('/mqtt-einstellungen','POST',new URLSearchParams(new FormData(event.target)).toString());
+    event.target.elements.passwort.value='';
+    status.textContent='Neue MQTT-Verbindung wird getestet. Noch nicht gespeichert.';
+    for (var i=0;i<90;++i) {
+      await new Promise(function(done){setTimeout(done,500);});
+      var result=await roomSaveRequest('/mqtt-einstellungen','GET');
+      if (result.state===2) {status.textContent='MQTT-Einstellungen gespeichert. Externe Automatisierungen auf den neuen Basispfad anpassen.';await loadMqttForm();return;}
+      if (result.state===3) {status.textContent='Wechsel fehlgeschlagen. Bisherige Konfiguration wieder aktiv.';await loadMqttForm();return;}
+    }
+    status.textContent='MQTT-Wechsel noch nicht bestaetigt. Bitte Status erneut pruefen.';
+  } catch(error) {status.textContent='Speichern nicht bestaetigt: '+error.message;}
+});
+document.getElementById('password-settings').addEventListener('submit',async function(event) {
+  event.preventDefault();var form=event.target,status=document.getElementById('password-save-status');
+  if(form.elements.neu.value!==form.elements.wiederholen.value) {status.textContent='Die neuen Passwoerter stimmen nicht ueberein.';return;}
+  try {
+    await roomSaveRequest('/anmeldepasswort','POST',new URLSearchParams(new FormData(form)).toString());
+    form.reset();status.textContent='Passwort wird gespeichert.';
+    for(var i=0;i<20;++i) {
+      await new Promise(function(done){setTimeout(done,500);});
+      var result=await roomSaveRequest('/anmeldepasswort-status','GET');
+      if(result.state===2) {setWebAccess(false);status.textContent='Passwort gespeichert. Bitte mit dem neuen Passwort anmelden.';return;}
+      if(result.state===3) {status.textContent='Nicht gespeichert: bisheriges Passwort falsch oder Speicherfehler. Bisheriges Passwort bleibt aktiv.';return;}
+    }
+    status.textContent='Speichern noch nicht bestaetigt. Bitte erneut anmelden und pruefen.';
+  }catch(error) {status.textContent=error.message;}
+});
+loadMqttForm();
+setInterval(checkWebAccess,30000); checkWebAccess();
 function roomSaveRequest(url, method, body) {
   return new Promise(function(resolve, reject) {
     var request = new XMLHttpRequest();
     request.open(method, url, true); request.timeout = 2500;
+    if (webToken) request.setRequestHeader('X-Heizung-Session', webToken);
+    if (url === '/anmeldung') request.setRequestHeader('X-Heizung-Login', '1');
     if (body) request.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
     request.onload = function() {
+      if (request.status === 401 && url !== '/anmeldung') setWebAccess(false);
       if (request.status < 200 || request.status >= 300) { reject(new Error(request.responseText || 'Anfrage abgelehnt')); return; }
       try { resolve(JSON.parse(request.responseText)); } catch (error) { reject(error); }
     };

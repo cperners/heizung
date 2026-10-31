@@ -82,6 +82,7 @@ void set2mqttupdate(){
   mqtt2update=true;
 }
 void mqttupdate() {
+  if (mqttSettingsAreChanging()) return;
   if (!asyncMqttClient.connected()) {
     Serial.println("MQTT JSON: keine Verbindung");
     return;

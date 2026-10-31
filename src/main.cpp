@@ -46,7 +46,10 @@ https://github.com/fedorweems/YouTube/blob/Arduino-Game-V1/ESP8266%20Home%20Auto
 #include "ntp_diagnostics/ntp_diagnostics.h"
 
 #include "firmware/shared_state.inc"
+#include "firmware/web_access.inc"
+#include "firmware/wifi_settings.inc"
 #include "firmware/runtime_support.inc"
+#include "firmware/mqtt_settings.inc"
 #include "firmware/runtime_diagnostics.inc"
 #include "firmware/ota_diagnostics.inc"
 #include "firmware/web_status.inc"

@@ -172,6 +172,8 @@ void setup() {
    Serial.println(ssid);
    WiFi.onEvent(WiFiEvent);
    WiFi.mode(WIFI_STA);
+   loadWifiSettings();
+   WiFi.persistent(false);
    WiFi.begin(ssid, password);
    configTime(0, 0,
            NTP_SERVER1,
@@ -203,7 +205,8 @@ void setup() {
    asyncMqttClient.setCredentials(mqttUser, mqttPassword);
    asyncMqttClient.setClientId(mqttClientID);
    asyncMqttClient.onMessage(onMqttMessage);
-   asyncMqttClient.setServer(MQTT_HOST,MQTT_PORT);
+   loadMqttSettings();
+   configureMqttClient();
    
 
    timer0_time.start();
@@ -211,7 +214,11 @@ void setup() {
    timer2_ntp.start();
    timer3_mqttupdate.start();
   serial_clear_screen();
-  initWebSocket();
+  // Alter WebSocket-Pumpenschalter ist nicht mehr Bestandteil der Bedienung.
+  loadWebPassword();
+  registerWebAccess();
+  registerMqttSettings();
+  registerWifiSettings();
   // Route for root / web page
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
   request->send(new HeatingPageResponse());
@@ -231,6 +238,7 @@ void setup() {
     request->send(200, "text/plain; charset=utf-8", gasDisplay(daily));
   });
   server.on("/raumtemperaturen", HTTP_POST, [](AsyncWebServerRequest *request){
+    if (!requireWebSession(request)) return;
     if (!request->hasParam("tag", true) || !request->hasParam("nacht", true)) {
       request->send(400, "text/plain; charset=utf-8", "Tag und Nacht erforderlich"); return;
     }
@@ -280,6 +288,7 @@ void setup() {
     request->send(202, "application/json", response);
   });
   server.on("/vorlaufmaximum", HTTP_POST, [](AsyncWebServerRequest *request){
+    if (!requireWebSession(request)) return;
     if (!request->hasParam("maximum", true)) {
       request->send(400, "text/plain", "Maximale Vorlauftemperatur fehlt"); return;
     }
@@ -330,6 +339,7 @@ void setup() {
     request->send(202, "application/json", response);
   });
   server.on("/boilertemperatur", HTTP_POST, [](AsyncWebServerRequest *request){
+    if (!requireWebSession(request)) return;
     if (!request->hasParam("soll", true)) {
       request->send(400, "text/plain", "Boiler-Solltemperatur fehlt"); return;
     }
@@ -477,13 +487,14 @@ void setup() {
   server.on("/tkachelofen", HTTP_GET, [](AsyncWebServerRequest *request){
     request->send(200, "text/plain", readTemperature(tKachelofen));
   });
-  server.on("/kachelofen", HTTP_GET, [](AsyncWebServerRequest *request){
-    if(!request->hasParam("ein") || !request->hasParam("aus")){
+  server.on("/kachelofen", HTTP_POST, [](AsyncWebServerRequest *request){
+    if (!requireWebSession(request)) return;
+    if(!request->hasParam("ein", true) || !request->hasParam("aus", true)){
       request->send(400, "text/plain", "Parameter ein und aus erforderlich");
       return;
     }
-    String einText = request->getParam("ein")->value();
-    String ausText = request->getParam("aus")->value();
+    String einText = request->getParam("ein", true)->value();
+    String ausText = request->getParam("aus", true)->value();
     char* einEnd = nullptr;
     char* ausEnd = nullptr;
     float newEin = strtof(einText.c_str(), &einEnd);
@@ -500,7 +511,7 @@ void setup() {
     portENTER_CRITICAL(&webSettingsMux);
     requestedKachelofenThresholds = {true, newEin, newAus};
     portEXIT_CRITICAL(&webSettingsMux);
-    request->redirect("/");
+    request->send(202, "application/json", "{\"queued\":true}");
   });
   // Start ElegantOTA
   initializeOtaDiagnostics();
@@ -513,6 +524,7 @@ void setup() {
     response->addHeader("Cache-Control", "no-store");
     request->send(response);
   });
+  // Update-Zugang auf Wunsch ohne Passwort; Web-Einstellungen bleiben separat geschuetzt.
   ElegantOTA.begin(&server);
   server.begin();
   esp_task_wdt_reset(); //watchdog Zeit rücksetzen

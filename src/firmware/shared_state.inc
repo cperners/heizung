@@ -60,8 +60,10 @@ bool ntpTimeValid = false;
 int wifi_retry=0;
 int wifi_rssi=0;
 // Insert your WiFi secrets here:
-const char* ssid     = SECRET_SSID;
-const char* password = SECRET_PASS;
+char activeWifiSsid[33] = SECRET_SSID;
+char activeWifiPassword[65] = SECRET_PASS;
+const char* ssid = activeWifiSsid;
+const char* password = activeWifiPassword;
 // Set your Static IP address
 IPAddress local_IP(192, 168, 0, 2);
 // Set your Gateway IP address
@@ -110,7 +112,21 @@ float tvmax,taumin,n;
 // V2 Kachelofen-Erkennung (externer Sensor via MQTT)
 // Der Kachelofen ist hydraulisch nicht mit der Heizung verbunden.
 // Seine Temperatur entscheidet nur, ob Raum- oder Aussentemperaturregelung aktiv ist.
-static const char KACHELOFEN_MQTT_TOPIC[] = MQTT_TEXT "kachelofenTemp";
+static char mqttBaseTopic[81] = MQTT_TEXT;
+static char mqttControlTopic[128] = MQTT_TEXT "set";
+static char KACHELOFEN_MQTT_TOPIC[128] = MQTT_TEXT "kachelofenTemp";
+static char gasMqttTopic[128] = MQTT_TEXT "gaszaehler";
+// Ab hier verwenden alle Publisher den gemeinsam umstellbaren Basispfad.
+#undef MQTT_TEXT
+#define MQTT_TEXT mqttBaseTopic
+#undef GAS_MQTT_TOPIC
+#define GAS_MQTT_TOPIC gasMqttTopic
+static portMUX_TYPE mqttSettingsMux = portMUX_INITIALIZER_UNLOCKED;
+static bool mqttSettingsChanging = false;
+static bool mqttTransportIdle = true;
+static uint32_t mqttTopicGeneration=0;
+bool mqttSettingsAreChanging();
+void subscribeActiveMqttTopics();
 float tKachelofen = NAN;
 bool kachelofenAktiv = false;
 unsigned long kachelofenLastUpdate = 0;

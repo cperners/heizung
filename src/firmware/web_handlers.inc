@@ -15,8 +15,8 @@ void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
 
   // Empfangspuffer unveraendert lassen; exakt sechs Zeichen pruefen.
   if (len == 6 && memcmp(data, "toggle", 6) == 0) {
-    HeizungsRelais = !HeizungsRelais;
-    notifyClients();
+    // Ausgangsaenderungen erfolgen ausschliesslich ueber die Regelung.
+    return;
   }
 }
 
@@ -165,7 +165,10 @@ String processor(const String& var){
   }else if(var == "WIFIRSSI"){
     return readValue(WiFi.RSSI());
   }else if(var == "WIFISSID"){
-    return ssid; 
+    String name(ssid);
+    name.replace("&", "&amp;"); name.replace("<", "&lt;"); name.replace(">", "&gt;");
+    name.replace("\"", "&quot;"); name.replace("'", "&#39;");
+    return name;
   }
   return String();
 }

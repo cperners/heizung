@@ -40,8 +40,8 @@ void updateMischerOffMode() {
   const bool off = !UrlaubBetrieb && !WinterBetrieb && !BoilerBetrieb && !NurHeizung;
   if (!off) {
     if (mischerOffMode) {
-      digitalWrite(MischerAuf_Pin, LOW);
-      digitalWrite(MischerZu_Pin, LOW);
+      writeRelayOutput(MischerAuf_Pin, LOW);
+      writeRelayOutput(MischerZu_Pin, LOW);
       MischerAufRelais = MischerZuRelais = false;
       mischerPulseActive = false;
       mischerOffMode = false;
@@ -52,7 +52,7 @@ void updateMischerOffMode() {
   }
   // Never allow retained heat demands to re-enable the burner in AUS.
   BrennerRelais = false;
-  digitalWrite(BrennerPin, LOW);
+  writeRelayOutput(BrennerPin, LOW);
   if (!mischerOffMode) {
     mischerOffMode = true;
     mischerOffFinished = false;
@@ -62,8 +62,8 @@ void updateMischerOffMode() {
     mischer_wait = mischer_drive = 0;
     mischer_init_laeuft = mischer_init_auf = mischer_init_zu = false;
     previousTime_MischerInit = 0;
-    digitalWrite(MischerAuf_Pin, LOW);
-    digitalWrite(MischerZu_Pin, LOW);
+    writeRelayOutput(MischerAuf_Pin, LOW);
+    writeRelayOutput(MischerZu_Pin, LOW);
     MischerAufRelais = MischerZuRelais = false;
       mischerPulseActive = false;
   }
@@ -72,8 +72,8 @@ void updateMischerOffMode() {
   if (!cool) {
     if (!offHeatRecoveryActive) {
       // Restart regulated heat removal if the boiler warms again during AUS.
-      digitalWrite(MischerAuf_Pin, LOW);
-      digitalWrite(MischerZu_Pin, LOW);
+      writeRelayOutput(MischerAuf_Pin, LOW);
+      writeRelayOutput(MischerZu_Pin, LOW);
       MischerAufRelais = MischerZuRelais = false;
       mischerPulseActive = false;
       mischer_wait = mischer_drive = 0;
@@ -101,9 +101,9 @@ void updateMischerOffMode() {
     mischerOffClosing = MISCHER_OFF_CLOSE_MS != 0;
     mischerOffFinished = MISCHER_OFF_CLOSE_MS == 0;
   }
-  digitalWrite(MischerAuf_Pin, LOW);
+  writeRelayOutput(MischerAuf_Pin, LOW);
   MischerAufRelais = false;
-  digitalWrite(MischerZu_Pin, mischerOffClosing ? HIGH : LOW);
+  writeRelayOutput(MischerZu_Pin, mischerOffClosing ? HIGH : LOW);
   MischerZuRelais = mischerOffClosing;
 }
 
@@ -137,9 +137,9 @@ bool enforceVorlaufSensorLock() {
   if (vorlaufFaultOpening &&
       (unsigned long)(millis() - vorlaufFaultStarted) < VORLAUF_FAULT_OPEN_MS) {
     // Deliberate fault action, bypassing the normal movement guards.
-    digitalWrite(MischerZu_Pin, LOW);
+    writeRelayOutput(MischerZu_Pin, LOW);
     MischerZuRelais = false;
-    digitalWrite(MischerAuf_Pin, HIGH);
+    writeRelayOutput(MischerAuf_Pin, HIGH);
     MischerAufRelais = true;
   } else {
     if (vorlaufFaultOpening) {
@@ -276,9 +276,9 @@ void MischerInit(){
 void MischerAuf(){
   if (enforceVorlaufSensorLock()) return;
   mischerPulseActive = false;
-  digitalWrite(MischerZu_Pin, LOW);
+  writeRelayOutput(MischerZu_Pin, LOW);
   MischerZuRelais=false;
-  digitalWrite(MischerAuf_Pin, HIGH);
+  writeRelayOutput(MischerAuf_Pin, HIGH);
   MischerAufRelais=true;
 //  #if defined(EXMISCHER)
 //  bitClear(ioextender0_indicate, exMischerZu_Pin);
@@ -291,9 +291,9 @@ void MischerAuf(){
 void MischerZu(){
   if (enforceVorlaufSensorLock()) return;
   mischerPulseActive = false;
-  digitalWrite(MischerAuf_Pin, LOW);
+  writeRelayOutput(MischerAuf_Pin, LOW);
   MischerAufRelais=false;
-  digitalWrite(MischerZu_Pin, HIGH);
+  writeRelayOutput(MischerZu_Pin, HIGH);
   MischerZuRelais=true;
 //  #if defined(EXMISCHER)
 //  bitClear(ioextender0_indicate, exMischerAuf_Pin);
@@ -310,9 +310,9 @@ void MischerStop(){
   // Also check its deadline here, in case another caller reaches us first.
   if (vorlaufFaultOpening &&
       (unsigned long)(millis() - vorlaufFaultStarted) < VORLAUF_FAULT_OPEN_MS) return;
-  digitalWrite(MischerAuf_Pin, LOW);
+  writeRelayOutput(MischerAuf_Pin, LOW);
   MischerAufRelais=false;
-  digitalWrite(MischerZu_Pin, LOW);
+  writeRelayOutput(MischerZu_Pin, LOW);
   MischerZuRelais=false;
 //  #if defined(EXMISCHER)
 //  bitClear(ioextender0_indicate, exMischerZu_Pin);

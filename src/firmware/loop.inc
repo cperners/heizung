@@ -253,6 +253,7 @@ else {sensorDS1820_read(bWhichSensor);} //ds_neu
   updateCpuLoad();
   markLoopPhase(PHASE_WEB);
   refreshWebStatus();
+  serviceRelayEvents();
   markLoopPhase(PHASE_IDLE);
 }//end of loop()
 

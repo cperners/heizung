@@ -349,6 +349,7 @@ void onMqttConnect(bool sessionPresent) {
 }
 
 void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
+  relayEventsDisconnected();
   portENTER_CRITICAL(&mqttSettingsMux);
   mqttTransportIdle=true;
   portEXIT_CRITICAL(&mqttSettingsMux);

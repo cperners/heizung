@@ -229,7 +229,7 @@ void enforceKesselSensorLock() {
   const bool locked = !sensorIsUsable(0);
   if (locked) {
     BrennerRelais = false;
-    digitalWrite(BrennerPin, LOW);
+    writeRelayOutput(BrennerPin, LOW);
   }
   if (locked != lastLocked) {
     Serial.println(locked ? "Brenner gesperrt: Kesselsensor ungueltig" :

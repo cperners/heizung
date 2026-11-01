@@ -526,3 +526,6 @@ double pendingGasTotal = 0;
 bool pendingGas = false;
 bool pendingGasRetained = false;
 
+
+// Ausgangsereignisse: GPIO-Schreibweg bleibt synchron, MQTT-Versand im Hauptloop.
+void writeRelayOutput(uint8_t pin, uint8_t value);

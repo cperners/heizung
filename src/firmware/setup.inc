@@ -13,6 +13,7 @@ void setup() {
   pinMode(BoilerPin, OUTPUT);
   pinMode(MischerAuf_Pin, OUTPUT);
   pinMode(MischerZu_Pin, OUTPUT);
+  beginRelayEvents();
 
   if (!EEPROM.begin(EE_SIZE)) {
     Serial.println("Einstellungsspeicher konnte nicht gestartet werden");
@@ -202,6 +203,7 @@ void setup() {
    asyncMqttClient.onConnect(onMqttConnect);
    asyncMqttClient.onDisconnect(onMqttDisconnect); 
    asyncMqttClient.onSubscribe(onMqttSubscribe);
+   asyncMqttClient.onPublish(onRelayEventPublished);
    asyncMqttClient.setCredentials(mqttUser, mqttPassword);
    asyncMqttClient.setClientId(mqttClientID);
    asyncMqttClient.onMessage(onMqttMessage);

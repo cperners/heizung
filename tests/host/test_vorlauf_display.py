@@ -33,3 +33,13 @@ with tempfile.TemporaryDirectory() as d:
  subprocess.run(['clang++','-std=c++11',str(source),'-o',str(binary)],check=True)
  subprocess.run([str(binary)],check=True)
 print('Vorlauf-Sollwert, Differenzvorzeichen, Restwaerme und ungueltige Werte geprueft.')
+
+# Display-only curve reference must stay valid while AUS clears the control target.
+web=(root/'src/firmware/web_status.inc').read_text()
+a=web.index('float heatingCurveDisplayRoom()');b=web.index('void refreshWebStatus()',a)
+with tempfile.TemporaryDirectory() as d:
+ source=Path(d)/'curve.cpp';binary=Path(d)/'curve'
+ source.write_text("#include <cassert>\nbool offHeatRecoveryActive=false,UrlaubBetrieb=false,WinterBetrieb=false,NurHeizung=false;\nfloat tmyRoomdest=0,tRoomTag=22.5,tRoomNacht=21.5;char daynight='D';\n"+web[a:b]+"int main(){\nassert(heatingCurveDisplayRoom()==22.5f);assert(tmyRoomdest==0);\ndaynight='N';assert(heatingCurveDisplayRoom()==21.5f);\nUrlaubBetrieb=true;assert(heatingCurveDisplayRoom()==21.5f);\nUrlaubBetrieb=false;WinterBetrieb=true;tmyRoomdest=23;assert(heatingCurveDisplayRoom()==23);\nWinterBetrieb=false;offHeatRecoveryActive=true;tmyRoomdest=22.5;assert(heatingCurveDisplayRoom()==22.5f);\n}\n")
+ subprocess.run(['clang++','-std=c++11',str(source),'-o',str(binary)],check=True)
+ subprocess.run([str(binary)],check=True)
+print('Heizkurven-Vorschau bei AUS, Nacht, Urlaub und aktiver Regelung geprueft; Regelungssoll unveraendert.')

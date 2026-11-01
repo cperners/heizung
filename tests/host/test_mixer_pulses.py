@@ -24,6 +24,7 @@ using std::isfinite;using byte=uint8_t;
 #define MISCHER_BOILER_NACHPRUEFUNG_MINUTEN 10UL
 int pins[64]={};const int BrennerPin=16,MischerAuf_Pin=18,MischerZu_Pin=2;
 void digitalWrite(int p,int v){pins[p]=v;}
+void writeRelayOutput(uint8_t p,uint8_t v){digitalWrite(p,v);}
 uint32_t now=0;unsigned long millis(){return now;}void delay(int ms){now+=ms;}
 bool valid[5]={true,true,true,true,true};bool sensorIsUsable(int i){return valid[i];}
 bool UrlaubBetrieb=false,WinterBetrieb=true,BoilerBetrieb=false,NurHeizung=false;

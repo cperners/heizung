@@ -43,6 +43,18 @@ input[type="range"] { width: 100%; accent-color: #14796c; }
 form { line-height: 2; font-size: .9rem; }
 @media (max-width: 540px) { .layout { grid-template-columns: 1fr; padding: 0 16px; gap: 12px; margin: 16px auto; } .topnav { padding: 20px 16px; } }
 
+
+.layout > .heating-curve-card { grid-column:1 / -1; }
+.heating-curve { margin:0; padding:0; }
+.heating-curve summary { font-size:.9rem; font-weight:600; color:#536b74; cursor:pointer; }
+#heating-curve-chart { display:block; width:100%; height:260px; margin-top:8px; }
+#heating-curve-info, #heating-curve-state { margin:6px 0; font-size:.8rem; color:#607681; }
+.heating-curve-legend { display:flex; flex-wrap:wrap; gap:6px 12px; font-size:.8rem; color:#536b74; }
+.heating-curve-legend span { display:inline-flex; align-items:center; gap:5px; }
+.curve-line-key { width:18px; height:0; border-top:2px solid #14796c; }
+.curve-target-key { width:9px; height:9px; border-radius:50%; background:#14796c; }
+.curve-measured-key { width:9px; height:9px; background:#d98888; }
+
 /* Bedientasten fuer die Kachelofen-Schaltschwellen */
 .threshold-card { grid-column: span 1; }
 @media (max-width: 540px) { .threshold-card { grid-column: span 1; } }
@@ -195,6 +207,15 @@ fieldset:disabled button { opacity:.45; cursor:default; }
       <button id="boiler-save" class="threshold-save" type="submit">Boilereinstellungen speichern</button>
     </fieldset></form>
     <p id="boiler-settings" style="font-size:.8rem;color:#607681;">%BOILERINFO%</p>
+  </div>
+  <div class="heating-curve-card">
+    <details id="heating-curve-panel" class="heating-curve" open>
+      <summary>Heizkurve</summary>
+      <svg id="heating-curve-chart" role="img" aria-label="Heizkurve wird geladen"></svg>
+      <div class="heating-curve-legend"><span><i class="curve-line-key"></i>Kurve</span><span><i class="curve-target-key"></i>Soll</span><span><i class="curve-measured-key"></i>Ist</span></div>
+      <p id="heating-curve-info">Gespeicherte Einstellungen werden geladen.</p>
+      <p id="heating-curve-state" role="status">Wird geladen</p>
+    </details>
   </div>
   <p>
   </section>
@@ -550,6 +571,104 @@ document.getElementById('flow-limit').addEventListener('submit', async function(
   } finally { button.disabled = false; }
 });
 
+var heatingCurveModel = null;
+var heatingCurveRenderKey = '';
+function heatingCurveTarget(model, outside) {
+  if (!model || ![model.room,model.maximum,model.minimumOutside,model.exponent,outside].every(function(v) { return typeof v === 'number' && Number.isFinite(v); }) ||
+      model.room < 5 || model.room > 40 || model.maximum < model.room || model.maximum > 100 ||
+      model.minimumOutside < -50 || model.minimumOutside > 0 || model.exponent < 0.1 || model.exponent > 10) return null;
+  var ratio = Math.max(0, Math.min(1, (model.room-outside)/(model.room-model.minimumOutside)));
+  return Math.floor((model.room+(model.maximum-model.room)*Math.pow(ratio,1/model.exponent))*100)/100;
+}
+function heatingCurveTicks(minimum, maximum, plotWidth) {
+  var wanted = Math.max(2, Math.floor(plotWidth/38));
+  var required = Math.max(5, (maximum-minimum)/wanted);
+  var steps = [5,10,20,25,50,100,200];
+  var step = steps.find(function(value) { return value >= required; }) || 200;
+  var ticks = [];
+  for (var value = Math.ceil(minimum/step)*step; value <= maximum; value += step) ticks.push(value);
+  return ticks;
+}
+function showHeatingCurve(model) {
+  heatingCurveModel = model;
+  drawHeatingCurve();
+}
+function drawHeatingCurve() {
+  var svg = document.getElementById('heating-curve-chart');
+  var panel = document.getElementById('heating-curve-panel');
+  if (!panel.open) return;
+  var model = heatingCurveModel;
+  var width = Math.max(150, Math.round(svg.getBoundingClientRect().width || 240));
+  var key = JSON.stringify([model,width]);
+  if (key === heatingCurveRenderKey) return;
+  heatingCurveRenderKey = key;
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+  svg.setAttribute('viewBox','0 0 '+width+' 260');
+  var info = document.getElementById('heating-curve-info');
+  var state = document.getElementById('heating-curve-state');
+  function add(tag, attrs, text) {
+    var element = document.createElementNS('http://www.w3.org/2000/svg',tag);
+    Object.keys(attrs).forEach(function(name) { element.setAttribute(name, attrs[name]); });
+    if (text !== undefined) element.textContent = text;
+    svg.appendChild(element);
+    return element;
+  }
+  function label(x,y,text,anchor) { return add('text',{x:x,y:y,fill:'#536b74','font-size':11,'text-anchor':anchor || 'start'},text); }
+  function number(value) { return value.toFixed(1).replace('.',','); }
+  if (!model || heatingCurveTarget(model,model.room) === null) {
+    info.textContent = model ? 'Gespeicherte Heizkurvenwerte ungueltig.' : 'Keine aktuellen Daten.';
+    state.textContent = 'Kurve nicht verfuegbar';
+    svg.setAttribute('aria-label',state.textContent);
+    label(width/2,130,'Nicht verfuegbar','middle');
+    return;
+  }
+  var hasOutside = typeof model.outside === 'number' && Number.isFinite(model.outside) && model.outside >= -55 && model.outside <= 125;
+  var hasMeasured = typeof model.measured === 'number' && Number.isFinite(model.measured);
+  var hasTarget = model.active === true && typeof model.target === 'number' && Number.isFinite(model.target) && model.target >= model.room && model.target <= model.maximum;
+  var xMin = Math.floor(Math.min(model.minimumOutside-5,hasOutside ? model.outside : model.minimumOutside)/5)*5;
+  var xMax = Math.ceil(Math.max(model.room+5,hasOutside ? model.outside : model.room)/5)*5;
+  var yMin = Math.floor(Math.min(model.room,hasOutside && hasMeasured ? model.measured : model.room)/5)*5-2;
+  var yMax = Math.ceil(Math.max(model.maximum,hasOutside && hasMeasured ? model.measured : model.maximum)/5)*5+2;
+  var left=34,right=width-10,top=25,bottom=220;
+  var x=function(value){return left+(value-xMin)/(xMax-xMin)*(right-left);};
+  var y=function(value){return bottom-(value-yMin)/(yMax-yMin)*(bottom-top);};
+  add('title',{},'Gespeicherte Heizkurve: Vorlauf-Solltemperatur nach Aussentemperatur');
+  label(0,12,'Vorlauf (\u00b0C)');
+  label((left+right)/2,255,'Aussen (\u00b0C)','middle');
+  [0,0.5,1].forEach(function(fraction) {
+    var value = yMin+(yMax-yMin)*fraction;
+    add('line',{x1:left,y1:y(value),x2:right,y2:y(value),stroke:'#dce5e8','stroke-width':1});
+    label(left-5,y(value)+4,number(value),'end');
+  });
+  heatingCurveTicks(xMin,xMax,right-left).forEach(function(value) {
+    add('line',{x1:x(value),y1:top,x2:x(value),y2:bottom,stroke:'#e8eef0','stroke-width':1});
+    add('line',{x1:x(value),y1:bottom,x2:x(value),y2:bottom+4,stroke:'#bdcdd3','stroke-width':1});
+    label(x(value),237,String(value),'middle');
+  });
+  add('path',{d:'M '+left+' '+top+' V '+bottom+' H '+right,fill:'none',stroke:'#bdcdd3','stroke-width':1});
+  var points=[];
+  for(var i=0;i<=100;i++) {
+    var outside=xMin+(xMax-xMin)*i/100;
+    points.push((i?'L':'M')+x(outside).toFixed(2)+' '+y(heatingCurveTarget(model,outside)).toFixed(2));
+  }
+  add('path',{d:points.join(' '),fill:'none',stroke:'#14796c','stroke-width':2,'stroke-linejoin':'round'});
+  if (hasOutside) {
+    add('line',{x1:x(model.outside),y1:top,x2:x(model.outside),y2:bottom,stroke:'#929ba1','stroke-width':1,'stroke-dasharray':'3 3'});
+    if (hasTarget) add('circle',{cx:x(model.outside),cy:y(model.target),r:4,fill:'#14796c'});
+    if (hasMeasured) add('rect',{x:x(model.outside)-3.5,y:y(model.measured)-3.5,width:7,height:7,fill:'#d98888'});
+  }
+  info.textContent='Gespeichert: Raum '+number(model.room)+' \u00b0C; Maximum '+number(model.maximum)+' \u00b0C; Faktor '+number(model.exponent)+'.';
+  state.textContent = !hasOutside ? 'Kein gueltiger Aussenwert.' : 'Aussen '+number(model.outside)+' \u00b0C'+(hasTarget ? ' / Soll '+number(model.target)+' \u00b0C' : ' / Heizkurvenberechnung nicht aktiv oder nicht verfuegbar')+(hasMeasured ? ' / Ist '+number(model.measured)+' \u00b0C' : ' / Kein gueltiger Vorlaufwert.');
+  svg.setAttribute('aria-label',state.textContent);
+}
+document.getElementById('heating-curve-panel').addEventListener('toggle',function() {
+  heatingCurveRenderKey=''; drawHeatingCurve();
+});
+if (typeof ResizeObserver !== 'undefined') {
+  var heatingCurveResize = new ResizeObserver(function() { drawHeatingCurve(); });
+  heatingCurveResize.observe(document.getElementById('heating-curve-chart'));
+} else window.addEventListener('resize',function() { drawHeatingCurve(); });
+
 var temperatureKeys = ['troom','taussen','tkessel','tvorlauf','tboiler','tkachelofen'];
 temperatureKeys.forEach(function(key) {
   var arrow = document.createElement('span');
@@ -581,6 +700,7 @@ function showDiagnostics(health) {
 var lastStatusGeneration = null;
 var lastStatusChange = Date.now();
 function unavailableSharedStatus() {
+  showHeatingCurve(null);
   showBurnerFlame(null);
   showHeatingPump(null);
   showBoilerPump(null);
@@ -652,6 +772,7 @@ function updateSharedStatus() {
       showMixerStatus(data.outputs[3] === 1, data.outputs[4] === 1);
       updateBoilerDeltaColor();
       showDiagnostics(data.diagnostics);
+      showHeatingCurve(data.heatingCurve);
       temperatureKeys.forEach(function(key, index) { showTemperatureTrend(key, data.trends[index]); });
     } catch (error) { unavailableSharedStatus(); }
   };

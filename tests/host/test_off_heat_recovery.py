@@ -27,7 +27,8 @@ using byte=uint8_t;
 #define MISCHER_RUHEZONE_GRAD 0.5f
 constexpr uint32_t MISCHER_PULSE_MS = 5000;
 constexpr int BrennerPin=16,HeizungPin=4,BoilerPin=5,MischerAuf_Pin=18,MischerZu_Pin=2;
-int pins[64]={};void digitalWrite(int p,int v){pins[p]=v;}int digitalRead(int p){return pins[p];}
+int pins[64]={};void digitalWrite(int p,int v){pins[p]=v;}
+void writeRelayOutput(uint8_t p,uint8_t v){digitalWrite(p,v);}int digitalRead(int p){return pins[p];}
 unsigned long now=0;unsigned long millis(){return now;}
 bool valid[5]={true,true,true,true,true};bool sensorIsUsable(byte i){return i<5 && valid[i];}
 bool UrlaubBetrieb=false,WinterBetrieb=true,BoilerBetrieb=false,NurHeizung=false;

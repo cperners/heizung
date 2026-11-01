@@ -50,6 +50,7 @@ https://github.com/fedorweems/YouTube/blob/Arduino-Game-V1/ESP8266%20Home%20Auto
 #include "firmware/wifi_settings.inc"
 #include "firmware/runtime_support.inc"
 #include "firmware/mqtt_settings.inc"
+#include "firmware/relay_events.inc"
 #include "firmware/runtime_diagnostics.inc"
 #include "firmware/ota_diagnostics.inc"
 #include "firmware/web_status.inc"

@@ -287,7 +287,7 @@ bool pumpOutputWithFault(PumpFaultState& state, bool fault, bool requested,
 void SetOutPin(){
   if (!UrlaubBetrieb && !WinterBetrieb && !BoilerBetrieb && !NurHeizung) {
     BrennerRelais = false;
-    digitalWrite(BrennerPin, LOW);
+    writeRelayOutput(BrennerPin, LOW);
   }
   if (UrlaubBetrieb) { BoilerRelais = false; BoilerAnforderung = false; BoilerAufheizen = false; }
   enforceKesselSensorLock();
@@ -307,24 +307,24 @@ void SetOutPin(){
   HeizungsRelais = heatingOn;
   BoilerRelais = boilerOn;
   if (heatingOn){
-    digitalWrite(HeizungPin, HIGH);
+    writeRelayOutput(HeizungPin, HIGH);
    // bitSet(ioextender0_indicate, exHeizung_Pin);
   }else{
-    digitalWrite(HeizungPin, LOW);
+    writeRelayOutput(HeizungPin, LOW);
    // bitClear(ioextender0_indicate, exHeizung_Pin);
   }
   if (boilerOn){
-    digitalWrite(BoilerPin, HIGH);
+    writeRelayOutput(BoilerPin, HIGH);
    // bitSet(ioextender0_indicate, exBoiler_Pin);
   }else{
-    digitalWrite(BoilerPin, LOW);
+    writeRelayOutput(BoilerPin, LOW);
    // bitClear(ioextender0_indicate, exBoiler_Pin);
   }
   if (BrennerRelais==true){
-    digitalWrite(BrennerPin, HIGH);
+    writeRelayOutput(BrennerPin, HIGH);
    // bitSet(ioextender0_indicate, exBrenner_Pin);
   }else{
-    digitalWrite(BrennerPin, LOW);
+    writeRelayOutput(BrennerPin, LOW);
    // bitClear(ioextender0_indicate, exBrenner_Pin);
   }
   //I2C_IO_BitWrite(ioextender0_addr,ioextender0_indicate);

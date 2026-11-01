@@ -29,6 +29,11 @@ void addTemperatureTrend(JsonArray trends, byte index, float value,
   }
   trends.add(trend.direction);
 }
+// AUS/Boiler-only use zero internally, but the saved curve is still viewable.
+float heatingCurveDisplayRoom() {
+  const bool selected = offHeatRecoveryActive || (!UrlaubBetrieb && (WinterBetrieb || NurHeizung));
+  return selected ? tmyRoomdest : (daynight == 'D' ? tRoomTag : tRoomNacht);
+}
 void refreshWebStatus() {
   static unsigned long lastRefresh = 0;
   static uint32_t generation = 0;
@@ -81,6 +86,18 @@ void refreshWebStatus() {
   values["gas-total"] = gasDisplay(false);
   values["ntp-abweichung"] = ntpProbeDisplay();
   values["kachelofen-status"] = kachelofenAktiv ? "AKTIV" : "INAKTIV";
+  // Small numeric model; the browser draws the curve without extra requests.
+  JsonObject curve = doc["heatingCurve"].to<JsonObject>();
+  curve["room"] = heatingCurveDisplayRoom();
+  curve["maximum"] = tvmax;
+  curve["minimumOutside"] = taumin;
+  curve["exponent"] = n;
+  curve["outside"] = sensorIsUsable(2) && isfinite(tAussen) ? tAussen : NAN;
+  curve["measured"] = sensorIsUsable(1) && isfinite(tVorlauf) ? tVorlauf : NAN;
+  const bool curveSelected = offHeatRecoveryActive || (!UrlaubBetrieb && (WinterBetrieb || NurHeizung));
+  curve["active"] = curveSelected && heizkurveGueltig && sensorIsUsable(0) && sensorIsUsable(1) &&
+      sensorIsUsable(2) && (offHeatRecoveryActive || AussentemperaturRegelung != 0 || sensorIsUsable(3));
+  curve["target"] = curve["active"].as<bool>() && isfinite(vorlaufTemperatur) ? vorlaufTemperatur : NAN;
   JsonArray outputs = doc["outputs"].to<JsonArray>();
   outputs.add(digitalRead(BrennerPin) == HIGH ? 1 : 0);
   outputs.add(digitalRead(BoilerPin) == HIGH ? 1 : 0);

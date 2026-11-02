@@ -1,7 +1,7 @@
 # ESP32-Heizungssteuerung – Projektdokumentation
 
-Stand: **1. November 2026**. Vollstaendige Dokumentation einschliesslich
-MQTT-Schaltereignissen, Node-RED-Funktion und eigener Heizkurvenkachel.
+Stand: **2. November 2026**. Vollstaendige Dokumentation einschliesslich
+aufklappbarer Anmeldung, MQTT-Schaltprotokoll und Heizkurvengrafik.
 Keine Produktivzugangsdaten oder Firmware-Dateien enthalten.
 
 Lokale Pruefungen und bestaetigte Geraetebeobachtungen sind getrennt beschrieben.
@@ -101,6 +101,13 @@ Neu sind [MQTT-Protokoll der Schaltausgaenge](https://github.com/cperners/heizun
 breite Kachel [Dynamische Heizkurvengrafik](https://github.com/cperners/heizung/wiki/Heizkurve). Die Vorschau bei Aus ist korrigiert.
 Build und lokale Pruefungen sind erfolgreich; die neuesten Darstellungs- und
 Ereignis-Geraetetests bleiben als offen dokumentiert.
+
+### Anmeldung bei Bedarf
+
+Seit dem 2. November 2026 erscheinen Benutzername und Passwort erst nach Klick
+auf **Anmelden**. Die bisherigen Zugriffsregeln bleiben erhalten.
+Siehe [Anmeldung und Netzwerk](https://github.com/cperners/heizung/wiki/Anmeldung-und-Netzwerk). Die lokale Pruefung ist erfolgreich,
+der Geraetetest der neuen Bedienfolge bleibt offen.
 
 ---
 
@@ -265,9 +272,38 @@ Heizkurve und aktuelle Soll-/Istpunkte. Sie ist ohne Anmeldung sichtbar.
 Bei Aus bleibt die Vorschau anhand der Tag-/Nacht-Einstellung sichtbar; ein
 aktiver Sollwert wird dadurch nicht vorgetaeuscht. Details: [Dynamische Heizkurvengrafik](https://github.com/cperners/heizung/wiki/Heizkurve).
 
+### Anmelden erst bei Bedarf
+
+Die Anmeldefelder sind zunaechst ausgeblendet. **Anmelden** oeffnet Benutzername
+und Passwort; **Abbrechen** schliesst die Felder wieder. Werte bleiben sichtbar,
+Regelung und Betriebsart frei bedienbar. Details: [Anmeldung und Netzwerk](https://github.com/cperners/heizung/wiki/Anmeldung-und-Netzwerk).
+
 ---
 
 ## Anmeldung und Netzwerk
+
+### Anmeldefelder aufklappen
+
+Beim Oeffnen der Heizungswebseite sind weiterhin alle Mess- und Einstellwerte
+sichtbar. Im Anmeldebereich wird zunaechst nur die Schaltflaeche **Anmelden**
+angezeigt. Benutzername und Passwort sind ausgeblendet.
+
+1. **Anmelden** anklicken. Die beiden Eingabefelder erscheinen; der Fokus steht
+   im Benutzernamenfeld.
+2. Benutzername und Passwort eingeben und im Formular **Anmelden** anklicken.
+3. Bei erfolgreicher Anmeldung verschwinden die Felder. Die geschuetzten
+   Einstellungen werden freigegeben und **Abmelden** wird angezeigt.
+4. **Abbrechen** schliesst das Formular ohne Anmeldung, leert das Passwortfeld
+   und zeigt wieder die einzelne Anmelden-Schaltflaeche.
+5. Nach Abmeldung oder Ablauf der Sitzung sind die Felder wieder ausgeblendet.
+
+Waehrend der Eingabe bleibt das geoeffnete Formular trotz regelmaessiger
+Sitzungspruefung geoeffnet. Bei fehlerhaften Zugangsdaten bleibt es fuer eine
+Korrektur offen. Der Browser kann seine normale Passwortverwaltung verwenden;
+die Firmware liefert kein gespeichertes Passwort an die Webseite zurueck.
+
+
+Die neue Darstellung ist lokal geprueft und gebaut; der Geraetetest ist noch offen.
 
 ### Frei sichtbar und frei bedienbar
 
@@ -1397,3 +1433,14 @@ Raum-Sollwert ist dort null. Die neue, lokal gepruefte Vorschau verwendet
 die Tag-/Nacht-Einstellung, ohne die Heizungsregelung zu aendern.
 Die eigene breite Kachel und diese Korrektur sind noch am ESP32/iPhone
 zu bestaetigen. Details: [MQTT-Protokoll der Schaltausgaenge](https://github.com/cperners/heizung/wiki/MQTT-Schaltereignisse) und [Dynamische Heizkurvengrafik](https://github.com/cperners/heizung/wiki/Heizkurve).
+
+### Aufklappbares Anmeldeformular
+
+Lokal geprueft: anfangs ausgeblendete Felder, explizites Oeffnen, Abbrechen
+mit leerem Passwortfeld, erfolgreiche Anmeldung/Abmeldung, Offenbleiben waehrend
+Sitzungspruefungen sowie unveraenderte freie Schalter. JavaScript-Syntax und
+Firmware-Build erfolgreich. Die neue Bedienfolge ist am Geraet noch offen.
+
+```sh
+node tests/host/test_web_access_ui.js
+```

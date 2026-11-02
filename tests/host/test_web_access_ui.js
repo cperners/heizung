@@ -2,7 +2,7 @@
 const fs=require('fs'), vm=require('vm'), assert=require('assert'), path=require('path');
 const page=fs.readFileSync(path.join(__dirname,'../../src/web/page.cpp'),'utf8');
 const elements=new Map();
-const get=id=>{if(!elements.has(id))elements.set(id,{hidden:false,textContent:'',addEventListener(){}});return elements.get(id)};
+const get=id=>{if(!elements.has(id))elements.set(id,{hidden:false,textContent:'',handlers:{},attrs:{},elements:{benutzer:{focus(){}},passwort:{value:''}},focus(){},setAttribute(k,v){this.attrs[k]=v},addEventListener(k,fn){this.handlers[k]=fn}});return elements.get(id)};
 const fields=Array.from({length:7},()=>({disabled:true}));
 const storage=new Map();
 const context={document:{getElementById:get,querySelectorAll(){return fields}},sessionStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},setInterval(){},roomSaveRequest:async()=>({angemeldet:false})};
@@ -10,7 +10,16 @@ vm.createContext(context);
 vm.runInContext(page.slice(page.indexOf('var webToken'),page.indexOf('function roomSaveRequest')),context);
 context.webToken='existing';storage.set('heizung-session','existing');context.setWebAccess(true);
 assert(fields.every(f=>!f.disabled));assert(get('web-login').hidden);assert(!get('web-logout').hidden);
-context.setWebAccess(false);assert(fields.every(f=>f.disabled));assert(!get('web-login').hidden);assert(get('web-logout').hidden);assert(!storage.has('heizung-session'));
+context.setWebAccess(false);assert(fields.every(f=>f.disabled));assert(get('web-login').hidden);assert(!get('web-login-open').hidden);assert(get('web-logout').hidden);assert(!storage.has('heizung-session'));
+// Login fields appear only after an explicit click and remain open while typing.
+assert(/<form id="web-login"[^>]* hidden>/.test(page));
+assert(page.includes('#web-access [hidden] { display:none !important; }'));
+get('web-login-open').handlers.click();assert(!get('web-login').hidden);assert(get('web-login-open').hidden);
+context.setWebAccess(false);assert(!get('web-login').hidden);
+get('web-login').elements.passwort.value='temporary';get('web-login-cancel').handlers.click();
+assert(get('web-login').hidden);assert(!get('web-login-open').hidden);assert.equal(get('web-login').elements.passwort.value,'');
+context.setWebAccess(true);assert(get('web-login').hidden&&get('web-login-open').hidden);
+context.setWebAccess(false);assert(get('web-login').hidden&&!get('web-login-open').hidden);
 // Authentication forms have no prefilled secret; all five editable forms fail closed in HTML.
 for(const id of ['flow-limit','boiler-setpoint','room-setpoints','stove-settings','wifi-settings','mqtt-settings','password-settings']) {
  const form=page.match(new RegExp('<form id="'+id+'"[\\s\\S]*?</form>'))[0];assert(form.includes('<fieldset class="protected-settings" disabled>'));

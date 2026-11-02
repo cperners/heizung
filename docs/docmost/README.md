@@ -18,3 +18,5 @@ Passwörter und keine Firmware-BIN. Noch offene Gerätetests sind in den Kapitel
 
 Nur die neuesten Ergaenzungen importieren: **Heizkurve-und-MQTT-Schaltereignisse.md**.
 Diese Datei enthaelt auch die vollstaendige Node-RED-Funktion.
+
+Aenderung vom 2. November 2026 separat importieren: **Anmeldeformular.md**.

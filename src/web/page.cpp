@@ -93,6 +93,7 @@ form { line-height: 2; font-size: .9rem; }
 fieldset.protected-settings { border:0; padding:0; margin:0; min-width:0; }
 fieldset:disabled button { opacity:.45; cursor:default; }
 #web-access { max-width:1120px; margin:12px auto; padding:0 24px; }
+#web-access [hidden] { display:none !important; }
 #web-access form { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
 #web-access input, #wifi-settings input, #mqtt-settings input, #password-settings input { max-width:100%; padding:8px; border:1px solid #bdcdd3; border-radius:7px; font:inherit; }
 [hidden] { display:none !important; }
@@ -109,10 +110,12 @@ fieldset:disabled button { opacity:.45; cursor:default; }
   </div>
   <div id="web-access">
     <p id="access-status" role="status">Werte sichtbar. Zum &Auml;ndern der Einstellungen bitte anmelden.</p>
-    <form id="web-login" autocomplete="on">
+    <button class="button" id="web-login-open" type="button" aria-controls="web-login" aria-expanded="false">Anmelden</button>
+    <form id="web-login" autocomplete="on" hidden>
       <label>Benutzer <input name="benutzer" autocomplete="username" maxlength="32" required></label>
       <label>Passwort <input name="passwort" type="password" autocomplete="current-password" maxlength="64" required></label>
       <button class="button" type="submit">Anmelden</button>
+      <button class="button" id="web-login-cancel" type="button">Abbrechen</button>
     </form>
     <button class="button" id="web-logout" type="button" hidden>Abmelden</button>
   </div>
@@ -393,10 +396,20 @@ function adjustThreshold(id, direction) {
   <p>
 <script>
 var webToken = '';
+var webAccessAllowed = false;
+var webLoginOpen = false;
+function showWebLogin(open) {
+  webLoginOpen = open && !webAccessAllowed;
+  document.getElementById('web-login').hidden = !webLoginOpen;
+  document.getElementById('web-login-open').hidden = webAccessAllowed || webLoginOpen;
+  document.getElementById('web-login-open').setAttribute('aria-expanded', String(webLoginOpen));
+}
 try { webToken = sessionStorage.getItem('heizung-session') || ''; } catch (_) {}
 function setWebAccess(allowed) {
   document.querySelectorAll('fieldset.protected-settings').forEach(function(field) { field.disabled = !allowed; });
-  document.getElementById('web-login').hidden = allowed;
+  if (allowed || webAccessAllowed) webLoginOpen = false;
+  webAccessAllowed = allowed;
+  showWebLogin(webLoginOpen);
   document.getElementById('web-logout').hidden = !allowed;
   document.getElementById('access-status').textContent = allowed
     ? 'Angemeldet. Einstellungen freigegeben; Abmeldung nach 15 Minuten ohne geschuetzte Anfrage.'
@@ -411,6 +424,15 @@ async function checkWebAccess() {
     document.getElementById('access-status').textContent = 'Verbindung unterbrochen. Einstellungen bis zur erneuten Pruefung gesperrt.';
   }
 }
+document.getElementById('web-login-open').addEventListener('click', function() {
+  showWebLogin(true);
+  document.getElementById('web-login').elements.benutzer.focus();
+});
+document.getElementById('web-login-cancel').addEventListener('click', function() {
+  document.getElementById('web-login').elements.passwort.value = '';
+  showWebLogin(false);
+  document.getElementById('web-login-open').focus();
+});
 document.getElementById('web-login').addEventListener('submit', async function(event) {
   event.preventDefault();
   try {

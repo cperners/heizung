@@ -39,9 +39,6 @@ static const char *mode_names[]={"Aus","Frostschutz","Automatik","Nur Heizung","
 static const char *mode_keys[]={"off","frost","auto","heating","dhw","holiday"};
 static const heating_mode_t mode_values[]={MODE_OFF,MODE_FROST,MODE_AUTO,MODE_HEATING_ONLY,MODE_DHW_ONLY,MODE_HOLIDAY};
 static const uint32_t colors[]={0x246fbd,0x207e71,0xbb493d,0x8754a3,0xa26910,0xcf6025};
-static uint32_t touch_reads,touch_hits,touch_errors,touch_outside;
-static uint16_t last_touch_x,last_touch_y;
-static lv_obj_t *touch_info;
 static int pending_mode=-1;
 static unsigned history_hours=1;
 static bool history_dirty=true,visible[6]={true,true,true,true,true,true};
@@ -57,17 +54,18 @@ static void flush(lv_display_t *d,const lv_area_t *area,uint8_t *pixels){
  lv_display_flush_ready(d);
 }
 static void touch_read(lv_indev_t *indev,lv_indev_data_t *data){
- (void)indev;data->state=LV_INDEV_STATE_RELEASED;touch_reads++;
+ (void)indev;data->state=LV_INDEV_STATE_RELEASED;
  if(!touch)return;
  esp_err_t e=esp_lcd_touch_read_data(touch);
- if(e!=ESP_OK){if(touch_errors++%100==0)ESP_LOGW(TAG,"Touch lesen: %s",esp_err_to_name(e));return;}
+ if(e!=ESP_OK){
+  static uint32_t last_error;
+  uint32_t now=ticks();
+  if(!last_error||now-last_error>=10000){ESP_LOGW(TAG,"Touch lesen: %s",esp_err_to_name(e));last_error=now;}
+  return;
+ }
  uint16_t x=0,y=0,strength=0;uint8_t count=0;
- if(esp_lcd_touch_get_coordinates(touch,&x,&y,&strength,&count,1)&&count){
-  last_touch_x=x;last_touch_y=y;touch_hits++;
-  bool inside=x<W&&y<H;if(!inside)touch_outside++;
-  static uint32_t last_log;uint32_t now=ticks();
-  if(now-last_log>=500){ESP_LOGI(TAG,"Beruehrung x=%u y=%u (%s)",x,y,inside?"im Bild":"ausserhalb");last_log=now;}
-  if(inside){data->point.x=x;data->point.y=y;data->state=LV_INDEV_STATE_PRESSED;}
+ if(esp_lcd_touch_get_coordinates(touch,&x,&y,&strength,&count,1)&&count&&x<W&&y<H){
+  data->point.x=x;data->point.y=y;data->state=LV_INDEV_STATE_PRESSED;
  }
 }
 static void mode_click(lv_event_t *event){if(ticks()-last_mode_write<2000)return;pending_mode=(int)(intptr_t)lv_event_get_user_data(event);last_mode_write=ticks();}
@@ -88,7 +86,6 @@ static void build_ui(void){
   lv_obj_remove_flag(card,LV_OBJ_FLAG_SCROLLABLE);lv_obj_set_style_border_color(card,lv_color_hex(0xd2e1e4),0);
   label(card,names[i],0,4,&lv_font_montserrat_20);temps[i]=label(card,"--.-- C",0,70,&lv_font_montserrat_40);
  }
- touch_info=label(overview,"Touchdiagnose startet",730,410,&lv_font_montserrat_14);lv_obj_set_width(touch_info,245);
  state_label=label(overview,"",730,4,&lv_font_montserrat_20);lv_obj_set_width(state_label,245);
  mode_note=label(modes,"Aktuelle Betriebsart wird geladen",12,10,&lv_font_montserrat_20);
  for(int i=0;i<6;i++){
@@ -136,7 +133,6 @@ static void update_status(void){
  for(int i=0;i<6;i++){bool valid=i<5?v.value[i].valid:st.valid;float t=i<5?v.value[i].celsius:st.celsius;
   if(valid)lv_label_set_text_fmt(temps[i],"%.2f C",(double)t);else lv_label_set_text(temps[i],"--.-- C");
  }
- lv_label_set_text_fmt(touch_info,"Touch: %lu Punkte / %lu Fehler\nx=%u y=%u | ausserhalb %lu",(unsigned long)touch_hits,(unsigned long)touch_errors,last_touch_x,last_touch_y,(unsigned long)touch_outside);
  time_t now=time(NULL);struct tm tm;localtime_r(&now,&tm);
  lv_label_set_text_fmt(header,"HEIZUNGSSTEUERUNG  |  %02d:%02d %s | ETH %s MQTT %s",tm.tm_hour,tm.tm_min,now>1700000000?"":"(Zeit fehlt)",ethernet_has_ip()?"OK":"--",mqtt_connected()?"OK":"--");
  lv_label_set_text_fmt(state_label,"%s\n\nBrenner: %s\n\nHeizpumpe: %s\n\nBoilerpumpe: %s\n\nMischer: %s\n\nRestwaerme: %s",config_mode_name(c.mode),s.outputs.burner?"Ein":"Aus",s.outputs.heating_pump?"Ein":"Aus",s.outputs.boiler_pump?"Ein":"Aus",s.outputs.mixer==MIX_OPEN?"Auf":s.outputs.mixer==MIX_CLOSE?"Zu":"Stop",s.rest_heat_active?"Aktiv":"Aus");
@@ -176,9 +172,6 @@ static esp_err_t hardware_init(void){
  uint8_t addr=i2c_master_probe(i2c,0x5d,100)==ESP_OK?0x5d:0x14;
  if(i2c_master_probe(i2c,addr,100)==ESP_OK){esp_lcd_panel_io_handle_t tio;esp_lcd_panel_io_i2c_config_t tc=ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG();tc.dev_addr=addr;tc.scl_speed_hz=100000;
   if((e=esp_lcd_new_panel_io_i2c(i2c,&tc,&tio))!=ESP_OK)return e;
-  uint8_t resolution[4]={0};
-  if(esp_lcd_panel_io_rx_param(tio,0x8048,resolution,sizeof(resolution))==ESP_OK)
-   ESP_LOGI(TAG,"GT911 konfigurierte Flaeche: %u x %u",resolution[0]|(resolution[1]<<8),resolution[2]|(resolution[3]<<8));
   esp_lcd_touch_io_gt911_config_t extra={.dev_addr=addr};/* GT911 reports the Touch-C coordinates rotated 180 degrees relative to
      this panel scan orientation. Inclusive maxima keep edge coordinates valid. */
   esp_lcd_touch_config_t tcfg={.x_max=W-1,.y_max=H-1,.rst_gpio_num=-1,.int_gpio_num=-1,.flags={.mirror_x=1,.mirror_y=1},.driver_data=&extra};
@@ -193,10 +186,9 @@ static esp_err_t hardware_init(void){
 }
 static void display_task(void *unused){
  (void)unused;esp_err_t e=hardware_init();if(e!=ESP_OK){ESP_LOGE(TAG,"Anzeige nicht gestartet: %s; Regler laeuft weiter",esp_err_to_name(e));vTaskDelete(NULL);return;}
- build_ui();update_status();update_history();uint32_t last=ticks(),history=last,diagnostic=last;
+ build_ui();update_status();update_history();uint32_t last=ticks(),history=last;
  ESP_LOGI(TAG,"Touch-C gestartet, Touch %s",touch?"bereit":"fehlt");
  for(;;){uint32_t now=ticks();if(now-last>=1000){update_status();last=now;}if(history_dirty||now-history>=30000){update_history();history=now;}
-  if(now-diagnostic>=10000){ESP_LOGI(TAG,"Touchdiagnose: Abfragen=%lu Punkte=%lu Fehler=%lu ausserhalb=%lu",(unsigned long)touch_reads,(unsigned long)touch_hits,(unsigned long)touch_errors,(unsigned long)touch_outside);diagnostic=now;}
   uint32_t delay=lv_timer_handler();if(delay<10)delay=10;if(delay>30)delay=30;vTaskDelay(pdMS_TO_TICKS(delay));}
 }
 void touch_display_start(void (*reader)(heating_status_t *)){

@@ -63,3 +63,7 @@ Beim gezielten Druck unten auf „Verlauf“ meldete der GT911 x=381, y=28. Das 
 ## Am Gerät bestätigt (3. November 2026)
 
 Nach Ergänzung der Einschaltfolge und Spiegelung beider Touchachsen bestätigt der Nutzer: Bild und Beleuchtung funktionieren, und die Seiten wechseln passend zur Berührung. Langzeitstabilität, alle Betriebsartwechsel und Verhalten bei Displayausfall sind damit noch nicht vollständig geprüft.
+
+## Diagnose nach erfolgreicher Inbetriebnahme entfernt
+
+Auf Nutzerwunsch sind Touchzähler, Koordinatenanzeige sowie regelmäßige Berührungs-/Diagnoseprotokolle wieder entfernt. Beide Achsenspiegelungen und die korrigierte Display-Einschaltfolge bleiben erhalten. Echte Initialisierungs- und Lesefehler werden weiterhin gemeldet; Lesefehler höchstens einmal in zehn Sekunden. Die vorstehenden Diagnoseabschnitte dokumentieren die Fehlersuche, nicht die aktuelle Anzeige.

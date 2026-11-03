@@ -33,3 +33,5 @@ Der vorhandene Mischerantrieb bleibt ein ESBE Typ 86. Die vollständige Laufzeit
 Die Wärmenutzung beim Ausschalten endet standardmäßig bei 30 °C Kesseltemperatur oder nach 30 Minuten. Beide Grenzen sind einstellbar. Die Temperatur ist eine Nutzervorgabe, keine bestätigte Herstellerfreigabe für den Harreither Mono Star G15 von 1993.
 
 Passwörter und Firmwaredateien sind nicht Bestandteil dieses Wiki-Pakets.
+
+[Alle Einstellungen am Touchdisplay und Bildschirmruhe](TOUCH_EINSTELLUNGEN.md).

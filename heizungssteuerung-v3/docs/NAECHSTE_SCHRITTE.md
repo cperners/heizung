@@ -33,3 +33,7 @@ Die vorgemerkten Punkte Pumpenschutz im Sommerbetrieb und zusätzlicher Rücklau
 ## Touch-Firmware – 3. November 2026
 
 Native Touch-C-Oberfläche mit vier Seiten, Treibern und PSRAM erfolgreich gebaut. Reale Anzeige, Touch-Ausrichtung und Laufzeitprüfung noch offen; siehe TOUCH_DISPLAY.md. Der frühere Vermerk „noch nicht implementiert“ zum Display beschreibt den Stand vor diesem Datum. Docmost-Seite nach dem Funktionstest aktualisieren.
+
+## Erweiterte Touchbedienung
+
+Alle Einstellwerte mit eigenem Zahlencode (anfangs 1234, am Display änderbar) und Bildschirmruhe nach einer Minute umgesetzt und gebaut. Keine SD-Karte. Gerätetest der neuen Menüs und des Aufweckens steht aus; Nutzer möchte morgen testen. Siehe TOUCH_EINSTELLUNGEN.md.

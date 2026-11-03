@@ -1,4 +1,5 @@
 #include "web.h"
+#include "touch_access.h"
 #include "web_auth.h"
 #include "sensors.h"
 #include "outputs.h"
@@ -54,6 +55,7 @@ static esp_err_t result(httpd_req_t *r,const char *status,const char *message) {
     httpd_resp_set_status(r,status);cJSON *j=cJSON_CreateObject();if(j)cJSON_AddStringToObject(j,"message",message);return json_send(r,j);
 }
 static bool auth(httpd_req_t *r) {
+    if(touch_access_authorized(r))return true;
     char header[256]={0};
     bool okay=httpd_req_get_hdr_value_str(r,"Authorization",header,sizeof(header))==ESP_OK&&web_auth_verify(header);
     mbedtls_platform_zeroize(header,sizeof(header));
@@ -206,6 +208,7 @@ static esp_err_t update(httpd_req_t *r) {
 }
 esp_err_t web_init(web_status_reader_t reader) {
     read_status=reader;esp_err_t e=web_auth_init();if(e!=ESP_OK)return e;
+    e=touch_access_init();if(e!=ESP_OK)return e;
     unsigned char random[32];esp_fill_random(random,sizeof(random));for(int i=0;i<32;i++)snprintf(csrf+2*i,3,"%02x",random[i]);
     esp_timer_create_args_t timer={.callback=restart,.name="web_restart"};e=esp_timer_create(&timer,&restart_timer);if(e!=ESP_OK)return e;
     httpd_config_t cfg=HTTPD_DEFAULT_CONFIG();cfg.stack_size=12288;cfg.max_uri_handlers=21;

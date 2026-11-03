@@ -67,3 +67,13 @@ Nach Ergänzung der Einschaltfolge und Spiegelung beider Touchachsen bestätigt 
 ## Diagnose nach erfolgreicher Inbetriebnahme entfernt
 
 Auf Nutzerwunsch sind Touchzähler, Koordinatenanzeige sowie regelmäßige Berührungs-/Diagnoseprotokolle wieder entfernt. Beide Achsenspiegelungen und die korrigierte Display-Einschaltfolge bleiben erhalten. Echte Initialisierungs- und Lesefehler werden weiterhin gemeldet; Lesefehler höchstens einmal in zehn Sekunden. Die vorstehenden Diagnoseabschnitte dokumentieren die Fehlersuche, nicht die aktuelle Anzeige.
+
+## Automatische Dunkelschaltung nach einer Minute
+
+Nach 60 Sekunden ohne gültige Berührung wird die Hintergrundbeleuchtung ausgeschaltet. Anzeige, Touchabfrage und Heizungsregelung laufen weiter. Der erste Tipp schaltet nur das Licht wieder ein; seine komplette Berührung wird bis zu einer frisch gemeldeten Fingerfreigabe vom Bedienweg ferngehalten. Erst eine weitere Berührung bedient Schaltflächen. Ein leerer Abfragezyklus oder Lesefehler zählt nicht als Loslassen. Bei fehlendem Touchcontroller wird nicht automatisch abgeschaltet.
+
+Die Zusatzanzeige mit Touchzähler und x/y-Koordinaten ist entfernt. Tests prüfen Zeitgrenze, Aktivitätsverlängerung, fehlgeschlagene Lichtschaltung, unterdrückte Aufweckberührung, Loslassen und Überlauf des Millisekundenzählers. Abschaltung und Aufwecken sind nach Installation noch am Gerät zu bestätigen. Die Zeit beträgt fest 60 Sekunden.
+
+## Erweiterte Einstellungen und Bildschirmruhe
+
+Die neue Fassung ergänzt sämtliche Einstellwerte, eigenen Displaycode (anfangs 1234, am Display änderbar) und Abschaltung nach einer Minute mit reinem Aufwecktipp. Keine SD-Karte. Die frühere reine Einstellungsübersicht ist ersetzt. Bedienung und Prüfgrenzen: [TOUCH_EINSTELLUNGEN.md](TOUCH_EINSTELLUNGEN.md). Die neuen Menüs sind noch am Gerät zu testen.

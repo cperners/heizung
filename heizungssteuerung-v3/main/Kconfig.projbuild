@@ -5,6 +5,9 @@ config HEATING_TOUCH_DISPLAY
     help
         EK79007 1024x600, GT911 auf I2C GPIO7/8. Benoetigt PSRAM.
 
+config HEATING_TOUCH_PIN
+    string "Anfaenglicher Display-Zahlencode (4 bis 8 Ziffern)"
+    default "1234"
 config HEATING_ACTUATORS_ENABLED
     bool "Lastausgaenge nach abgeschlossener Inbetriebnahme freigeben"
     default n

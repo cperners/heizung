@@ -75,3 +75,5 @@ Einstellbare Restwärmenutzung beim Wechsel auf Aus: [Verhalten und Prüfstand](
 [Touchdisplay: Anschluss, Bedienung und Prüfstand](docs/TOUCH_DISPLAY.md).
 
 [Aktueller Projektstand als Markdown](docs/STATUS_2026-11-03.md).
+
+[Alle Einstellungen am Touchdisplay, eigener Zahlencode und Bildschirmruhe](docs/TOUCH_EINSTELLUNGEN.md).

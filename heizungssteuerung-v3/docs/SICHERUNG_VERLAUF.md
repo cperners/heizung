@@ -4,7 +4,7 @@
 
 Nach Anmeldung unter „Einstellungen sichern & wiederherstellen“ auf „Einstellungen herunterladen“ klicken. Die JSON-Datei enthält die vollständige Regelung mit Betriebsart und Zeitprogramm, MQTT-Adresse, Benutzer und Basistopic, drei Zeitserver, Kachelofen- und Gaszähler-Einstellungen.
 
-Nicht enthalten sind MQTT-Passwort, Webzugang, Gas-Tagesbasis, Gesamtzählerstand und Messverläufe. Bei Wiederherstellung bleiben die auf dem Zielgerät vorhandenen Zugangsdaten erhalten; ein neues Gerät muss diese separat bekommen. Die Datei enthält Netzwerkadressen und Topics und sollte entsprechend aufbewahrt werden.
+Nicht enthalten sind Display-Zahlencode, MQTT-Passwort, Webzugang, Gas-Tagesbasis, Gesamtzählerstand und Messverläufe. Bei Wiederherstellung bleiben die auf dem Zielgerät vorhandenen Zugangsdaten erhalten; ein neues Gerät muss diese separat bekommen. Die Datei enthält Netzwerkadressen und Topics und sollte entsprechend aufbewahrt werden.
 
 Zum Zurückspielen Datei auswählen und bestätigen. Nur angemeldete Benutzer können exportieren oder importieren. Die Firmware prüft Schema, vollständige Felder, Datentypen und Grenzwerte aller Abschnitte vor der ersten Änderung. Unbekannte Felder, Duplikate, Kennwortfelder und inkompatible Versionen werden abgelehnt. Dateien müssen kleiner als 8192 Byte sein.
 

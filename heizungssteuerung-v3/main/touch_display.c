@@ -1,4 +1,6 @@
 #include "touch_display.h"
+#include "display_idle.h"
+#include "touch_settings.h"
 #include "sdkconfig.h"
 #if CONFIG_HEATING_TOUCH_DISPLAY
 #include <math.h>
@@ -32,7 +34,12 @@ static const char *TAG="touch_display";
 static void (*get_status)(heating_status_t *);
 static esp_lcd_panel_handle_t panel;
 static esp_lcd_touch_handle_t touch;
-static lv_obj_t *temps[6],*state_label,*header,*mode_note,*mode_buttons[6],*settings,*chart,*history_note;
+static esp_lcd_panel_io_handle_t touch_io;
+static i2c_master_dev_handle_t backlight;
+static display_idle_t idle;
+static uint32_t light_attempt;
+static bool light_attempted;
+static lv_obj_t *temps[6],*state_label,*header,*mode_note,*mode_buttons[6],*chart,*history_note;
 static lv_chart_series_t *series[6];
 static const char *names[]={"Aussen","Raum","Kessel","Vorlauf","Boiler","Kachelofen"};
 static const char *mode_names[]={"Aus","Frostschutz","Automatik","Nur Heizung","Nur Boiler","Urlaub"};
@@ -44,6 +51,17 @@ static unsigned history_hours=1;
 static bool history_dirty=true,visible[6]={true,true,true,true,true,true};
 static uint32_t last_mode_write;
 static uint32_t ticks(void){return (uint32_t)(esp_timer_get_time()/1000);}
+static void apply_idle(display_idle_action_t action,uint32_t now){
+ if(action==DISPLAY_IDLE_NONE||!backlight)return;
+ if(light_attempted&&(uint32_t)(now-light_attempt)<1000)return;
+ light_attempt=now;light_attempted=true;
+ if(action==DISPLAY_IDLE_BLANK)touch_settings_lock();
+ uint8_t cmd[]={0x96,action==DISPLAY_IDLE_BLANK?0:255};
+ esp_err_t e=i2c_master_transmit(backlight,cmd,sizeof(cmd),100);
+ display_idle_commit(&idle,action,e==ESP_OK,now);
+ if(e==ESP_OK)light_attempted=false;
+ if(e!=ESP_OK)ESP_LOGW(TAG,"Hintergrundlicht schalten: %s",esp_err_to_name(e));
+}
 static lv_obj_t *label(lv_obj_t *parent,const char *value,int x,int y,const lv_font_t *font){
  lv_obj_t *o=lv_label_create(parent);lv_label_set_text(o,value);lv_obj_set_pos(o,x,y);lv_obj_set_style_text_font(o,font,0);return o;
 }
@@ -56,6 +74,13 @@ static void flush(lv_display_t *d,const lv_area_t *area,uint8_t *pixels){
 static void touch_read(lv_indev_t *indev,lv_indev_data_t *data){
  (void)indev;data->state=LV_INDEV_STATE_RELEASED;
  if(!touch)return;
+ /* Only a fresh GT911 release frame may end the swallowed wake gesture.
+    An empty poll or a read error is not proof that the finger was lifted. */
+ bool release=false;
+ if(idle.suppress_touch&&touch_io){uint8_t status=0;
+  if(esp_lcd_panel_io_rx_param(touch_io,0x814e,&status,1)==ESP_OK)
+   release=(status&0x80)&&!(status&0x0f);
+ }
  esp_err_t e=esp_lcd_touch_read_data(touch);
  if(e!=ESP_OK){
   static uint32_t last_error;
@@ -64,7 +89,10 @@ static void touch_read(lv_indev_t *indev,lv_indev_data_t *data){
   return;
  }
  uint16_t x=0,y=0,strength=0;uint8_t count=0;
- if(esp_lcd_touch_get_coordinates(touch,&x,&y,&strength,&count,1)&&count&&x<W&&y<H){
+ bool contact=esp_lcd_touch_get_coordinates(touch,&x,&y,&strength,&count,1)&&count&&x<W&&y<H;
+ uint32_t now=ticks();bool allowed_before=display_idle_accept_touch(&idle);
+ apply_idle(display_idle_step(&idle,now,contact,release&&!contact),now);
+ if(contact&&allowed_before&&display_idle_accept_touch(&idle)){
   data->point.x=x;data->point.y=y;data->state=LV_INDEV_STATE_PRESSED;
  }
 }
@@ -103,8 +131,7 @@ static void build_ui(void){
  history_note=label(history,"Warte auf Messpunkte",12,4,&lv_font_montserrat_20);
  for(int i=0;i<3;i++){unsigned hours[]={1,6,24};lv_obj_t *b=lv_button_create(history);lv_obj_set_pos(b,650+i*105,0);lv_obj_set_size(b,95,40);lv_obj_t *l=lv_label_create(b);lv_label_set_text_fmt(l,"%u Std",hours[i]);lv_obj_center(l);lv_obj_add_event_cb(b,history_range,LV_EVENT_CLICKED,(void *)(uintptr_t)hours[i]);}
  label(history,"Links: Beginn des Zeitraums  |  rechts: jetzt  |  Neustart loescht Verlauf",12,410,&lv_font_montserrat_20);
- settings=label(options,"",15,12,&lv_font_montserrat_20);lv_obj_set_width(settings,950);
- label(options,"Geschuetzte Einstellungen bitte nach Anmeldung auf der Webseite aendern.",15,410,&lv_font_montserrat_20);
+ touch_settings_create(options);
 }
 static void update_history(void){
  static int values[6][POINTS];
@@ -139,7 +166,7 @@ static void update_status(void){
  for(int i=0;i<6;i++){if(c.mode==mode_values[i])lv_obj_add_state(mode_buttons[i],LV_STATE_CHECKED);else lv_obj_remove_state(mode_buttons[i],LV_STATE_CHECKED);}
  if(pending_mode>=0){char json[48],reason[100];snprintf(json,sizeof(json),"{\"mode\":\"%s\"}",mode_keys[pending_mode]);pending_mode=-1;esp_err_t e=config_mode_update_json(json,reason,sizeof(reason));lv_label_set_text(mode_note,e==ESP_OK?"Betriebsart gespeichert":reason);}
  else lv_label_set_text_fmt(mode_note,"Aktuell: %s",config_mode_name(c.mode));
- lv_label_set_text_fmt(settings,"Heizkurve\nSteilheit %.1f  |  Vorlauf bei 0 C: %.1f C\nVorlauf min/max: %.1f / %.1f C\n\nBoiler\nSoll %.1f C  |  Hysterese %.1f C\n\nMischer\nVollstaendige Laufzeit: %u Sekunden\n\nTemperaturen und Einstellungen entsprechen der Webseite.",(double)c.curve_slope,(double)c.curve_zero,(double)c.flow_min,(double)c.flow_max,(double)c.boiler_target,(double)c.boiler_hysteresis,(unsigned)c.mixer_travel_s);
+
 }
 static esp_err_t hardware_init(void){
  if(heap_caps_get_total_size(MALLOC_CAP_SPIRAM)<2*1024*1024){ESP_LOGE(TAG,"PSRAM fehlt; Anzeige bleibt aus");return ESP_ERR_NO_MEM;}
@@ -155,7 +182,8 @@ static esp_err_t hardware_init(void){
   e=i2c_master_transmit(control,startup[i],sizeof(startup[i]),100);
   if(e!=ESP_OK){ESP_LOGE(TAG,"Display-Einschaltfolge Schritt %u: %s",i+1,esp_err_to_name(e));break;}
  }
- i2c_master_bus_rm_device(control);if(e!=ESP_OK)return e;
+ if(e!=ESP_OK){i2c_master_bus_rm_device(control);return e;}
+ backlight=control;
  ESP_LOGI(TAG,"Touch-C Displayversorgung freigegeben; Hintergrundlicht eingeschaltet");
  esp_ldo_channel_handle_t ldo;esp_ldo_channel_config_t power={.chan_id=3,.voltage_mv=2500};
  e=esp_ldo_acquire_channel(&power,&ldo);if(e!=ESP_OK)return e;
@@ -172,6 +200,7 @@ static esp_err_t hardware_init(void){
  uint8_t addr=i2c_master_probe(i2c,0x5d,100)==ESP_OK?0x5d:0x14;
  if(i2c_master_probe(i2c,addr,100)==ESP_OK){esp_lcd_panel_io_handle_t tio;esp_lcd_panel_io_i2c_config_t tc=ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG();tc.dev_addr=addr;tc.scl_speed_hz=100000;
   if((e=esp_lcd_new_panel_io_i2c(i2c,&tc,&tio))!=ESP_OK)return e;
+  touch_io=tio;
   esp_lcd_touch_io_gt911_config_t extra={.dev_addr=addr};/* GT911 reports the Touch-C coordinates rotated 180 degrees relative to
      this panel scan orientation. Inclusive maxima keep edge coordinates valid. */
   esp_lcd_touch_config_t tcfg={.x_max=W-1,.y_max=H-1,.rst_gpio_num=-1,.int_gpio_num=-1,.flags={.mirror_x=1,.mirror_y=1},.driver_data=&extra};
@@ -186,9 +215,12 @@ static esp_err_t hardware_init(void){
 }
 static void display_task(void *unused){
  (void)unused;esp_err_t e=hardware_init();if(e!=ESP_OK){ESP_LOGE(TAG,"Anzeige nicht gestartet: %s; Regler laeuft weiter",esp_err_to_name(e));vTaskDelete(NULL);return;}
+ display_idle_init(&idle,ticks());
  build_ui();update_status();update_history();uint32_t last=ticks(),history=last;
  ESP_LOGI(TAG,"Touch-C gestartet, Touch %s",touch?"bereit":"fehlt");
  for(;;){uint32_t now=ticks();if(now-last>=1000){update_status();last=now;}if(history_dirty||now-history>=30000){update_history();history=now;}
+  if(touch)apply_idle(display_idle_step(&idle,now,false,false),now);
+  touch_settings_poll();
   uint32_t delay=lv_timer_handler();if(delay<10)delay=10;if(delay>30)delay=30;vTaskDelay(pdMS_TO_TICKS(delay));}
 }
 void touch_display_start(void (*reader)(heating_status_t *)){

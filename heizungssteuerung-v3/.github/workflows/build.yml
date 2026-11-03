@@ -8,6 +8,10 @@ jobs:
       - run: tests/run_host_tests.sh
       - run: tests/run_stove_tests.sh
       - run: tests/run_modes_tests.sh
+      - run: tests/run_display_idle_tests.sh
+      - run: python3 tests/check_touch_settings_fields.py
+      - name: Display-Zahlencode pruefen
+        run: OPENSSL_ROOT=/usr tests/run_touch_access_tests.sh
       - run: sh tests/run_ota_tests.sh
       - run: sh tests/run_sensor_diagnostics_tests.sh
       - run: sh tests/run_rest_heat_tests.sh

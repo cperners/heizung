@@ -1,0 +1,39 @@
+menu "Heizungssteuerung"
+config HEATING_TOUCH_DISPLAY
+    bool "Waveshare 7-DSI-TOUCH-C aktivieren"
+    default n
+    help
+        EK79007 1024x600, GT911 auf I2C GPIO7/8. Benoetigt PSRAM.
+
+config HEATING_ACTUATORS_ENABLED
+    bool "Lastausgaenge nach abgeschlossener Inbetriebnahme freigeben"
+    default n
+    help
+        Erst nach Pruefung von Relaispolaritaet, Sensoren und unabhängigen
+        Kesselsicherheiten aktivieren. Ohne Freigabe bleiben alle Relais AUS.
+config HEATING_RELAY_ACTIVE_LOW
+    bool "Alle Relais sind aktiv LOW"
+    default n
+config HEATING_MQTT_URI
+    string "MQTT Broker URI (mqtt://host:1883 oder mqtts://host:8883)"
+    default "mqtt://192.168.0.1:1883"
+config HEATING_MQTT_USER
+    string "MQTT Benutzer"
+    default ""
+config HEATING_MQTT_PASSWORD
+    string "MQTT Passwort"
+    default ""
+config HEATING_PHY_ADDR
+    int "IP101 PHY-Adresse (-1: automatische Erkennung)"
+    range -1 31
+    default -1
+config HEATING_WEB_PASSWORD
+    string "Web-Kennwort fuer Benutzer admin (leer: nur Anzeige)"
+    default ""
+    help
+        Nicht mit dem MQTT-Passwort verwechseln. HTTP Basic Auth im lokalen
+        Netz, unverschluesselt. Ohne Kennwort sind alle Web-Aenderungen gesperrt.
+config HEATING_WEB_USERNAME
+    string "Web-Benutzer fuer die Ersteinrichtung"
+    default "admin"
+endmenu

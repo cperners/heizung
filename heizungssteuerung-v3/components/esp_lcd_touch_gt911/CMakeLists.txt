@@ -1,0 +1,5 @@
+set(vendor "${CMAKE_CURRENT_LIST_DIR}/../../.local/display-dependencies/esp-bsp/components/lcd_touch/esp_lcd_touch_gt911")
+if(NOT EXISTS "${vendor}/esp_lcd_touch_gt911.c")
+    message(FATAL_ERROR "Displayquellen fehlen. Bitte bash scripts/setup-display-deps.sh ausfuehren.")
+endif()
+idf_component_register(SRCS "${vendor}/esp_lcd_touch_gt911.c" INCLUDE_DIRS "${vendor}/include" REQUIRES esp_lcd driver esp_lcd_touch)

@@ -1,0 +1,1 @@
+rsource "../../.local/display-dependencies/esp-bsp/components/lcd_touch/esp_lcd_touch/Kconfig"

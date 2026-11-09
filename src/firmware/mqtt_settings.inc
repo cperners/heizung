@@ -98,7 +98,6 @@ static void serviceMqttSettings() {
     portEXIT_CRITICAL(&mqttSettingsMux);
     if (!pending) return;
     oldMqttSettings=activeMqttSettings;
-    connect2mqtt=false; mqttRecon=false;
     mqttChangePhase=1; mqttChangeStarted=now;
     asyncMqttClient.disconnect(true);
     return;
@@ -107,7 +106,7 @@ static void serviceMqttSettings() {
   portENTER_CRITICAL(&mqttSettingsMux); idle=mqttTransportIdle; portEXIT_CRITICAL(&mqttSettingsMux);
   if (mqttChangePhase==1) {
     if (!idle) {
-      if (static_cast<uint32_t>(now-mqttChangeStarted)>=10000UL) { finishMqttChange(3); connect2mqtt=true; }
+      if (static_cast<uint32_t>(now-mqttChangeStarted)>=10000UL) { finishMqttChange(3); }
       return;
     }
     useMqttSettings(pendingMqttSettings);
@@ -119,7 +118,7 @@ static void serviceMqttSettings() {
         // Keine alten Daten aus dem bisherigen Thema als neue Messung verwenden.
         kachelofenLastUpdate=0;
         portENTER_CRITICAL(&gasMux); pendingGas=false; portEXIT_CRITICAL(&gasMux);
-        finishMqttChange(2); mqttRecon=false; connect2mqtt=false;
+        finishMqttChange(2);
         subscribeActiveMqttTopics(); mqtt2update=true; return;
       }
       mqttChangePhase=3; mqttChangeStarted=now; asyncMqttClient.disconnect(true); return;
@@ -134,7 +133,7 @@ static void serviceMqttSettings() {
   if (mqttChangePhase==3 && idle) {
     useMqttSettings(oldMqttSettings); asyncMqttClient.clearQueue();
     if (mqttMessageQueue) xQueueReset(mqttMessageQueue);
-    configureMqttClient(); finishMqttChange(3); connect2mqtt=true;
+    configureMqttClient(); finishMqttChange(3);
   }
 }
 

@@ -139,12 +139,7 @@ void loop(){
   markLoopPhase(PHASE_NETWORK);
   serviceWifiSettings();
   if (!wifiTrialInProgress()) serviceWifiReconnect();
-  if(connect2mqtt && !mqttSettingsAreChanging() && !wifiTrialInProgress()){
-    connect2mqtt=false;
-    Serial.println("MQTT-Verbindungsversuch");
-    portENTER_CRITICAL(&mqttSettingsMux); mqttTransportIdle=false; portEXIT_CRITICAL(&mqttSettingsMux);
-    asyncMqttClient.connect();
-  }
+  serviceMqttReconnect();
   if(set2myuhr){
     set2myuhr=false;
     myuhr();
@@ -230,11 +225,6 @@ else {sensorDS1820_read(bWhichSensor);} //ds_neu
    if(bWhichSensor == (kTtureSensorMaxIndex+1)){
       bWhichSensor = 0;
       if(!MenuPage)Serial.print("\n");//Start new line
-   }
-   if (currentTime - previousTime_mqtt > MQTT_RECON_TIMER && mqttRecon){
-      previousTime_mqtt = currentTime;
-      mqttRecon=false;
-      connectToMqtt();
    }
    if (currentTime - previousTime1 > NTP_UPDATE){
      previousTime1 = currentTime;

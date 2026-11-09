@@ -72,7 +72,6 @@ IPAddress subnet(255, 255, 255, 0);
 IPAddress primaryDNS(192, 168, 0, 1);   //optional
 IPAddress secondaryDNS(8, 8, 8, 8); //optional
 
-bool connect2mqtt = false;
 
 int avg_time_ms;
 /* *******************************************************************************************************
@@ -237,10 +236,9 @@ unsigned long previousTime_wifi = 0;
 bool wifiRecon = false;
 portMUX_TYPE wifiReconnectMux = portMUX_INITIALIZER_UNLOCKED;
 uint32_t wifiDisconnectCount = 0;
+uint32_t wifiLinkGeneration = 0;
 uint32_t wifiReconnectCount = 0;
 uint8_t wifiLastDisconnectReason = 0;
-bool mqttRecon = false;
-unsigned long previousTime_mqtt = 0;
 volatile bool readSensor = false;
 /* *******************************************************************************************************
                                          LCD I2C
@@ -411,7 +409,7 @@ void WiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info);
 void onMqttConnect(bool sessionPresent);
 void onMqttDisconnect(AsyncMqttClientDisconnectReason reason);
 void onMqttSubscribe(uint16_t packetId, uint8_t qos);
-void connectToMqtt();
+void serviceMqttReconnect();
 void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total);
 void processMqttMessages();
 void connectToWifi();

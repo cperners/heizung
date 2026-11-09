@@ -42,8 +42,6 @@ void dayticker(){
     dayticker_hr=0;
     Schaltuhr();
   }
-  mqttRecon=true;//mqtt neu starten
-  previousTime_mqtt=millis();//mqtt neu starten
 }
 /* *******************************************************************************************************
                                          NTP update

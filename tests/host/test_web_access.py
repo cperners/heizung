@@ -80,7 +80,7 @@ struct DefaultHost {String toString(){return "old-broker";}};
 #define MQTT_PORT 1883
 #define MQTT_USERNAME "initial-user"
 #define MQTT_PASSWORD "initial-pass"
-bool connect2mqtt=false,mqttRecon=false,mqtt2update=false,pendingGas=false;uint32_t kachelofenLastUpdate=999;int gasMux=0;
+bool mqtt2update=false,pendingGas=false;uint32_t kachelofenLastUpdate=999;int gasMux=0;
 void* mqttMessageQueue=nullptr;int resets=0;void xQueueReset(void*){++resets;}
 bool mqttSettingsAreChanging();void subscribeActiveMqttTopics();
 struct AsyncMqttClientMessageProperties {bool retain=false;};

@@ -353,8 +353,6 @@ void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
   portENTER_CRITICAL(&mqttSettingsMux);
   mqttTransportIdle=true;
   portEXIT_CRITICAL(&mqttSettingsMux);
-  // Keine WLAN-Treiberaufrufe im MQTT-Callback: der Hauptloop besitzt Wiederanlaeufe.
-  mqttRecon=true; previousTime_mqtt=millis();
 }
 /* *******************************************************************************************************
                                          print LCD Values

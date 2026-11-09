@@ -8,17 +8,16 @@ void WiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
         portENTER_CRITICAL(&wifiReconnectMux);
         wifiRecon = false;
         portEXIT_CRITICAL(&wifiReconnectMux);
-        connectToMqtt();
         break;
     case SYSTEM_EVENT_STA_DISCONNECTED:
         Serial.println("WiFi lost connection");
         portENTER_CRITICAL(&wifiReconnectMux);
         ++wifiDisconnectCount;
+        ++wifiLinkGeneration;
         wifiLastDisconnectReason = info.wifi_sta_disconnected.reason;
         wifiRecon = true;
         previousTime_wifi = millis();
         portEXIT_CRITICAL(&wifiReconnectMux);
-        mqttRecon = false;
         break;
     case SYSTEM_EVENT_WIFI_READY: 
         break;
@@ -34,7 +33,9 @@ void WiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
         break;
     case SYSTEM_EVENT_STA_LOST_IP:
         connectToWifi();
-        mqttRecon=false;
+        portENTER_CRITICAL(&wifiReconnectMux);
+        ++wifiLinkGeneration;
+        portEXIT_CRITICAL(&wifiReconnectMux);
         break;
     case SYSTEM_EVENT_STA_WPS_ER_SUCCESS:
         break;
@@ -72,8 +73,48 @@ void WiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
         break; 
     }
 }
-void connectToMqtt() {
- connect2mqtt=true; 
+void serviceMqttReconnect() {
+  if (mqttSettingsAreChanging() || wifiTrialInProgress()) return;
+
+  const uint32_t now = millis();
+  const bool wifiReady = WiFi.status() == WL_CONNECTED && static_cast<uint32_t>(WiFi.localIP()) != 0;
+  static uint32_t seenLinkGeneration = 0;
+  static uint32_t lastAttempt = 0;
+  static bool attempted = false;
+
+  portENTER_CRITICAL(&wifiReconnectMux);
+  const uint32_t linkGeneration = wifiLinkGeneration;
+  portEXIT_CRITICAL(&wifiReconnectMux);
+  const bool linkChanged = linkGeneration != seenLinkGeneration;
+  seenLinkGeneration = linkGeneration;
+
+  portENTER_CRITICAL(&mqttSettingsMux);
+  const bool idle = mqttTransportIdle;
+  portEXIT_CRITICAL(&mqttSettingsMux);
+
+  const uint32_t elapsed = now - lastAttempt;
+  const bool timedOut = !asyncMqttClient.connected() && elapsed >= 30000UL;
+  if (!idle && (!wifiReady || linkChanged || timedOut)) {
+    asyncMqttClient.disconnect(true);
+    // A failed TCP/DNS start can leave MQTT busy without a disconnect callback.
+    portENTER_CRITICAL(&mqttSettingsMux);
+    const bool callbackMissing = !mqttTransportIdle;
+    portEXIT_CRITICAL(&mqttSettingsMux);
+    if (callbackMissing) onMqttDisconnect(AsyncMqttClientDisconnectReason::TCP_DISCONNECTED);
+    lastAttempt = now;
+    attempted = true;
+    return;
+  }
+
+  if (!wifiReady || !idle || (attempted && elapsed < MQTT_RECON_TIMER)) return;
+
+  lastAttempt = now;
+  attempted = true;
+  Serial.println("MQTT-Verbindungsversuch");
+  portENTER_CRITICAL(&mqttSettingsMux);
+  mqttTransportIdle = false;
+  portEXIT_CRITICAL(&mqttSettingsMux);
+  asyncMqttClient.connect();
 }
 /* *******************************************************************************************************
                                          NTP update

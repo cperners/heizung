@@ -28,6 +28,14 @@ static_assert(sizeof(HEIZUNG_WEB_PASSWORD) <= 65, "Anmeldepasswort maximal 64 By
 #define BAUD_RATE 115200
 #define MISCHER_WAIT 30
 #define MISCHER_DRIVE 5
+#define MISCHER_DRIVE_MIN_SECONDS 1
+#define MISCHER_DRIVE_MAX_SECONDS 10
+#define MISCHER_DRIVE_DEFAULT_MIN 2
+#define MISCHER_OPEN_DEFAULT_MIN 15
+#define MISCHER_OPEN_INTERVAL_MIN 5
+#define MISCHER_OPEN_INTERVAL_MAX 120
+static_assert(MISCHER_OPEN_INTERVAL_MIN > 0 && MISCHER_WAIT <= MISCHER_OPEN_INTERVAL_MAX &&
+              MISCHER_OPEN_INTERVAL_MAX < 255, "Ungueltige Mischer-Zeitgrenzen");
 // Innerhalb dieser Abweichung vom Vorlauf-Sollwert keine normale Stellfahrt.
 #define MISCHER_RUHEZONE_GRAD 0.5f
 // Einmalige Schliessfahrt beim Wechsel auf Betriebsart AUS (auch Start in AUS).
@@ -57,8 +65,15 @@ static_assert(sizeof(HEIZUNG_WEB_PASSWORD) <= 65, "Anmeldepasswort maximal 64 By
 #define MENUPAGE_NUM_AT 18
 #define MENUPAGE_MAX 18
 #define EEADDRESS_BOILER 0
+// Four unused bytes between the boiler setpoint and the room setpoint.
+#define EEADDRESS_MISCHER_INTERVALS 4
 #define EEADDRESS_RAUM 8
+static_assert(EEADDRESS_BOILER + sizeof(float) <= EEADDRESS_MISCHER_INTERVALS &&
+              EEADDRESS_MISCHER_INTERVALS + sizeof(uint32_t) <= EEADDRESS_RAUM, "Mischer-Einstellung ueberlappt EEPROM");
+#define EEADDRESS_MISCHER_DRIVE_TIMES 12
 #define EEADDRESS_KESSEL 16
+static_assert(EEADDRESS_RAUM + sizeof(float) <= EEADDRESS_MISCHER_DRIVE_TIMES &&
+              EEADDRESS_MISCHER_DRIVE_TIMES + sizeof(uint32_t) <= EEADDRESS_KESSEL, "Mischer-Fahrzeiten ueberlappen EEPROM");
 #define EEADDRESS_DIFFRAUM 24
 #define EEADDRESS_DIFFKESSEL 32
 #define EEADDRESS_RAUMNACHT 40

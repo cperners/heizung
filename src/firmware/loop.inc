@@ -76,7 +76,9 @@ void loop(){
   requestedFlowLimit.pending = false;
   portEXIT_CRITICAL(&roomSetpointMux);
   if (flowRequest.pending) {
-    const bool saved = saveFlowLimit(flowRequest.value, flowRequest.hasCurve, flowRequest.curve, flowRequest.hasRecovery, flowRequest.recovery);
+    const bool saved = saveFlowLimit(flowRequest.value, flowRequest.hasCurve, flowRequest.curve, flowRequest.hasRecovery, flowRequest.recovery,
+                                     flowRequest.hasMischerIntervals ? &flowRequest.intervals : nullptr,
+                                     flowRequest.hasDriveTimes ? &flowRequest.driveTimes : nullptr);
     portENTER_CRITICAL(&roomSetpointMux);
     RoomSaveResult& result = roomSaveResults[flowRequest.id % 8];
     if (result.id == flowRequest.id) result.state = saved ? 2 : 3;

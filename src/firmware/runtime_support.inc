@@ -41,18 +41,102 @@ bool saveBoilerSetpoint(float value, bool hasDifference = false, float differenc
   return true;
 }
 
+bool validMischerIntervals(int minimum, int maximum) {
+  return minimum >= MISCHER_OPEN_INTERVAL_MIN && minimum <= maximum &&
+         maximum <= MISCHER_OPEN_INTERVAL_MAX;
+}
+
+bool validMischerDriveTimes(int minimum, int maximum) {
+  return minimum >= 2 * MISCHER_DRIVE_MIN_SECONDS && minimum <= maximum &&
+         maximum <= 2 * MISCHER_DRIVE_MAX_SECONDS;
+}
+
+MischerIntervals decodeMischerDriveTimes(uint32_t stored) {
+  const uint32_t tag = stored & 0xffff0000UL;
+  if (tag != MISCHER_DRIVE_TIMES_TAG && tag != MISCHER_DRIVE_LEGACY_TAG) {
+    return DEFAULT_MISCHER_DRIVE_HALF_SECONDS;
+  }
+  const int scale = tag == MISCHER_DRIVE_LEGACY_TAG ? 2 : 1;
+  const int minimum = (stored & 0xff) * scale;
+  const int maximum = ((stored >> 8) & 0xff) * scale;
+  if (!validMischerDriveTimes(minimum, maximum)) return DEFAULT_MISCHER_DRIVE_HALF_SECONDS;
+  return {static_cast<uint8_t>(minimum), static_cast<uint8_t>(maximum)};
+}
+
+bool parseMischerDriveTime(const char* text, int& halfSeconds) {
+  if (*text < '0' || *text > '9') return false;
+  char* end = nullptr;
+  const long seconds = strtol(text, &end, 10);
+  if (seconds > MISCHER_DRIVE_MAX_SECONDS) return false;
+  halfSeconds = static_cast<int>(seconds) * 2;
+  if (*end == '.') {
+    ++end;
+    if (*end != '0' && *end != '5') return false;
+    if (*end++ == '5') ++halfSeconds;
+    while (*end == '0') ++end;
+  }
+  return *end == '\0';
+}
+
+bool parseMischerInterval(const char* text, int& seconds) {
+  seconds = 0;
+  if (!*text) return false;
+  for (; *text; ++text) {
+    if (*text < '0' || *text > '9') return false;
+    seconds = seconds * 10 + (*text - '0');
+    if (seconds > MISCHER_OPEN_INTERVAL_MAX) return false;
+  }
+  return true;
+}
+
+bool validRecoveryTarget(float value) {
+  return isfinite(value) && value >= 30 && value <= 40;
+}
+
+bool parseRecoveryTarget(const char* text, float& value) {
+  if (strlen(text) > 16) return false;
+  char* end = nullptr;
+  value = strtof(text, &end);
+  return end != text && *end == '\0' && validRecoveryTarget(value);
+}
+
 bool saveFlowLimit(float value, bool hasCurve = false, float curve = 0,
-                   bool hasRecovery = false, float recovery = 0) {
+                   bool hasRecovery = false, float recovery = 0,
+                   const MischerIntervals* intervals = nullptr,
+                   const MischerIntervals* driveTimes = nullptr) {
   if (!isfinite(value) || value < 0 || value > 100) return false;
   if (hasCurve && (!isfinite(curve) || curve < 0.1f || curve > 10)) return false;
-  if (hasRecovery && (!isfinite(recovery) || recovery < 30 || recovery > 40)) return false;
-  if (value == tvmax && (!hasCurve || curve == n) && (!hasRecovery || recovery == restwaermeZielTemp)) return true;
+  if (hasRecovery && !validRecoveryTarget(recovery)) return false;
+  if (intervals && !validMischerIntervals(intervals->minimum, intervals->maximum)) return false;
+  if (driveTimes && !validMischerDriveTimes(driveTimes->minimum, driveTimes->maximum)) return false;
+  const bool driveTimesChanged = driveTimes &&
+      (driveTimes->minimum != mischerDriveHalfSeconds.minimum || driveTimes->maximum != mischerDriveHalfSeconds.maximum);
+  const bool intervalsChanged = intervals &&
+      (intervals->minimum != mischerIntervals.minimum || intervals->maximum != mischerIntervals.maximum);
+  if (value == tvmax && (!hasCurve || curve == n) &&
+      (!hasRecovery || recovery == restwaermeZielTemp) && !intervalsChanged && !driveTimesChanged) return true;
+  uint32_t previousIntervals = 0;
+  if (intervalsChanged) {
+    EEPROM.get(EEADDRESS_MISCHER_INTERVALS, previousIntervals);
+    const uint32_t encoded = MISCHER_INTERVALS_TAG |
+        (static_cast<uint32_t>(intervals->maximum) << 8) | intervals->minimum;
+    EEPROM.put(EEADDRESS_MISCHER_INTERVALS, encoded);
+  }
+  uint32_t previousDriveTimes = 0;
+  if (driveTimesChanged) {
+    EEPROM.get(EEADDRESS_MISCHER_DRIVE_TIMES, previousDriveTimes);
+    const uint32_t encoded = MISCHER_DRIVE_TIMES_TAG |
+        (static_cast<uint32_t>(driveTimes->maximum) << 8) | driveTimes->minimum;
+    EEPROM.put(EEADDRESS_MISCHER_DRIVE_TIMES, encoded);
+  }
   const float previous = tvmax, previousCurve = n, previousRecovery = restwaermeZielTemp;
   if (hasRecovery) EEPROM.put(EEADDRESS_RESTWAERME_ZIEL, recovery);
   if (hasCurve) EEPROM.put(EEADDRESS_NN, curve);
   EEPROM.put(EEADDRESS_TVMAX, value);
   if (!EEPROM.commit()) {
     EEPROM.put(EEADDRESS_TVMAX, previous);
+    if (intervalsChanged) EEPROM.put(EEADDRESS_MISCHER_INTERVALS, previousIntervals);
+    if (driveTimesChanged) EEPROM.put(EEADDRESS_MISCHER_DRIVE_TIMES, previousDriveTimes);
     if (hasCurve) EEPROM.put(EEADDRESS_NN, previousCurve);
     if (hasRecovery) EEPROM.put(EEADDRESS_RESTWAERME_ZIEL, previousRecovery);
     return false;
@@ -60,6 +144,8 @@ bool saveFlowLimit(float value, bool hasCurve = false, float curve = 0,
   tvmax = value;
   if (hasCurve) n = curve;
   if (hasRecovery) restwaermeZielTemp = recovery;
+  if (intervalsChanged) mischerIntervals = *intervals;
+  if (driveTimesChanged) mischerDriveHalfSeconds = *driveTimes;
   return true;
 }
 

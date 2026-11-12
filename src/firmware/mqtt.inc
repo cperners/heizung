@@ -120,6 +120,40 @@ in FHEM:   set MQTT_SERVER publish /SmartHome/Keller/Heizung/setRaumTemp up
         return;
       }
     }
+    const char mixerPrefix[] = "mischerPause:";
+    const char drivePrefix[] = "mischerFahrt:";
+    const bool isDriveTime = strncmp(new_payload, drivePrefix, sizeof(drivePrefix)-1) == 0;
+    if (isDriveTime || strncmp(new_payload, mixerPrefix, sizeof(mixerPrefix)-1) == 0) {
+      char* minimumText = new_payload + (isDriveTime ? sizeof(drivePrefix) : sizeof(mixerPrefix))-1;
+      char* comma = strchr(minimumText, ',');
+      int minimum = 0, maximum = 0;
+      if (comma) *comma = '\0';
+      const auto parseTime = isDriveTime ? parseMischerDriveTime : parseMischerInterval;
+      if (properties.retain || !comma || !parseTime(minimumText, minimum) ||
+          !parseTime(comma + 1, maximum) ||
+          !(isDriveTime ? validMischerDriveTimes(minimum, maximum) : validMischerIntervals(minimum, maximum))) {
+        strcpy(mqtt_payload, isDriveTime ? "h_mischerfahrt_invalid" : "h_mischerpause_invalid");
+      } else {
+        const MischerIntervals values = {static_cast<uint8_t>(minimum), static_cast<uint8_t>(maximum)};
+        const bool saved = saveFlowLimit(tvmax, false, 0, false, 0,
+                                         isDriveTime ? nullptr : &values, isDriveTime ? &values : nullptr);
+        strcpy(mqtt_payload, saved ? (isDriveTime ? "h_mischerfahrt" : "h_mischerpause") : "h_save_error");
+      }
+      mqtt2update = true;
+      return;
+    }
+    const char recoveryPrefix[] = "restwaermeZieltemperatur:";
+    if (strncmp(new_payload, recoveryPrefix, sizeof(recoveryPrefix) - 1) == 0) {
+      float target = 0;
+      if (properties.retain || !parseRecoveryTarget(new_payload + sizeof(recoveryPrefix) - 1, target)) {
+        strcpy(mqtt_payload, "h_restwaerme_invalid");
+      } else {
+        const bool saved = saveFlowLimit(tvmax, false, 0, true, target);
+        strcpy(mqtt_payload, saved ? "h_restwaerme" : "h_save_error");
+      }
+      mqtt2update = true;
+      return;
+    }
     const char vacationPrefix[] = "urlaubTemp:";
     if (strncmp(new_payload, vacationPrefix, sizeof(vacationPrefix)-1) == 0) {
       const char* numeric = new_payload + sizeof(vacationPrefix)-1;

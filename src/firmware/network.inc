@@ -177,11 +177,16 @@ void mqttupdate() {
     default: break;
   }
   doc["atRegelung"].set(mqttRegelungsArt);
+  doc["kachelofenAktiv"] = kachelofenAktiv;
   doc["restwaermeAktiv"] = offHeatRecoveryActive;
   doc["restwaermeZieltemperatur"] = restwaermeZielTemp;
   doc["urlaubAktiv"] = UrlaubBetrieb != 0;
   doc["urlaubTemperatur"] = tRoomUrlaub;
   doc["PumpenNachlauf"].set(PumpenNachlauf);
+  doc["mischerPauseMin"] = mischerIntervals.minimum;
+  doc["mischerPauseMax"] = mischerIntervals.maximum;
+  doc["mischerFahrtMin"] = mischerDriveHalfSeconds.minimum / 2.0f;
+  doc["mischerFahrtMax"] = mischerDriveHalfSeconds.maximum / 2.0f;
   doc["tvmax"].set(tvmax);
   doc["taumin"].set(taumin);
   doc["n"].set(n);

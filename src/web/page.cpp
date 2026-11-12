@@ -180,6 +180,16 @@ fieldset:disabled button { opacity:.45; cursor:default; }
         <button type="button" aria-label="Restwaerme-Zieltemperatur erh&ouml;hen" onclick="document.getElementById('flow-recovery').stepUp()">+</button>
       </div>
       <small>Bis zu dieser Kesseltemperatur wird bei Aus Restw&auml;rme geregelt abgef&uuml;hrt. Standard: 35 &deg;C.</small>
+      <label for="mischer-min">Mischer-Ruhezeit bei gro&szlig;er Abweichung</label>
+      <input id="mischer-min" name="mischerMin" type="number" min="5" max="120" step="1" value="%MISCHERMIN%" required> s
+      <label for="mischer-max">Mischer-Ruhezeit nahe am Sollwert</label>
+      <input id="mischer-max" name="mischerMax" type="number" min="5" max="120" step="1" value="%MISCHERMAX%" required> s
+      <small>Stillstand nach dem Ende eines &Ouml;ffnungs- oder Schlie&szlig;impulses.</small>
+      <label for="mischer-drive-min">Mischer-Fahrzeit nahe am Sollwert</label>
+      <input id="mischer-drive-min" name="mischerFahrtMin" type="number" min="1" max="10" step="0.5" value="%MISCHERFAHRTMIN%" required> s
+      <label for="mischer-drive-max">Mischer-Fahrzeit bei gro&szlig;er Abweichung</label>
+      <input id="mischer-drive-max" name="mischerFahrtMax" type="number" min="1" max="10" step="0.5" value="%MISCHERFAHRTMAX%" required> s
+      <small>Die Mindestwerte f&uuml;r Fahr- und Ruhezeit d&uuml;rfen ihre H&ouml;chstwerte nicht &uuml;berschreiten.</small>
       <p id="flow-save-status" class="threshold-hint" role="status">&Auml;nderungen erst mit Speichern &uuml;bernehmen.</p>
       <button id="flow-save" class="threshold-save" type="submit">Vorlaufeinstellungen speichern</button>
     </fieldset></form>

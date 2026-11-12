@@ -97,9 +97,23 @@ bool BrennerRelais, HeizungsRelais, BoilerRelais, BoilerAufheizen = false;
 bool MischerAufRelais, MischerZuRelais = false;
 bool mischer_init_laeuft, mischer_init_auf, mischer_init_zu = false;
 
+struct MischerIntervals {
+  uint8_t minimum;
+  uint8_t maximum;
+};
+constexpr uint32_t MISCHER_INTERVALS_TAG = 0x4D490000UL;
+MischerIntervals mischerIntervals = {MISCHER_OPEN_DEFAULT_MIN, MISCHER_WAIT};
+constexpr uint32_t MISCHER_DRIVE_LEGACY_TAG = 0x4D440000UL;
+constexpr uint32_t MISCHER_DRIVE_TIMES_TAG = 0x4D450000UL;
+constexpr MischerIntervals DEFAULT_MISCHER_DRIVE_HALF_SECONDS = {
+  2 * MISCHER_DRIVE_DEFAULT_MIN, 2 * MISCHER_DRIVE_MAX_SECONDS
+};
+MischerIntervals mischerDriveHalfSeconds = DEFAULT_MISCHER_DRIVE_HALF_SECONDS;
 uint8_t mischer_wait, mischer_drive = 0;
 bool mischerPulseActive = false;
 uint32_t mischerPulseStarted = 0;
+uint32_t mischerPulseDurationMs = 0;
+bool mischerPulseUsesRest = false;
 const long mischer_init_time_auf = MISCHER_INIT_TIME_AUF;
 const long mischer_init_time_zu = MISCHER_INIT_TIME_ZU;
 char daynight='N';
@@ -147,7 +161,7 @@ uint32_t nextRoomSaveId = 0;
 RoomSetpointRequest requestedRoomSetpoints = {};
 struct BoilerSetpointRequest { bool pending; float value; uint32_t id; bool hasDifference; float difference; };
 BoilerSetpointRequest requestedBoilerSetpoint = {};
-struct FlowLimitRequest { bool pending; float value; uint32_t id; bool hasCurve; float curve; bool hasRecovery; float recovery; };
+struct FlowLimitRequest { bool pending; float value; uint32_t id; bool hasCurve; float curve; bool hasRecovery; float recovery; bool hasMischerIntervals; MischerIntervals intervals; bool hasDriveTimes; MischerIntervals driveTimes; };
 FlowLimitRequest requestedFlowLimit = {};
 portMUX_TYPE roomSetpointMux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE operatingModeMux = portMUX_INITIALIZER_UNLOCKED;
@@ -461,7 +475,7 @@ int chckKessel();
 void chckRoom(bool allowPumpStart = true);
 void runOffHeatRecovery();
 void regulateMischerToTarget(float target);
-void startRegulatedMischerPulse(bool opening);
+void startRegulatedMischerPulse(bool opening, uint8_t halfSeconds);
 void serviceRegulatedMischerPulse();
 void chckBoiler();
 void Regelungs_Switch_AI();

@@ -108,6 +108,14 @@ String processor(const String& var){
     return String(tvmax, 1);
   }else if(var == "RESTWAERMEZIEL"){
     return String(restwaermeZielTemp, 1);
+  }else if(var == "MISCHERMIN"){
+    return String(mischerIntervals.minimum);
+  }else if(var == "MISCHERMAX"){
+    return String(mischerIntervals.maximum);
+  }else if(var == "MISCHERFAHRTMIN"){
+    return String(mischerDriveHalfSeconds.minimum / 2.0f, 1);
+  }else if(var == "MISCHERFAHRTMAX"){
+    return String(mischerDriveHalfSeconds.maximum / 2.0f, 1);
   }else if(var == "KURVENSTEILHEIT"){
     return String(n, 1);
   }else if(var == "BOILERDELTA"){

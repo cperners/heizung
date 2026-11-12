@@ -23,6 +23,17 @@ void setup() {
   EEPROM.get(EEADDRESS_URLAUB_TEMP, tRoomUrlaub);
   EEPROM.get(EEADDRESS_URLAUB_AKTIV, UrlaubBetrieb);
   EEPROM.get(EEADDRESS_RESTWAERME_ZIEL, restwaermeZielTemp);
+  uint32_t storedIntervals = 0;
+  EEPROM.get(EEADDRESS_MISCHER_INTERVALS, storedIntervals);
+  const uint8_t minimum = storedIntervals & 0xff;
+  const uint8_t maximum = (storedIntervals >> 8) & 0xff;
+  if ((storedIntervals & 0xffff0000UL) == MISCHER_INTERVALS_TAG &&
+      validMischerIntervals(minimum, maximum)) {
+    mischerIntervals = {minimum, maximum};
+  }
+  uint32_t storedDriveTimes = 0;
+  EEPROM.get(EEADDRESS_MISCHER_DRIVE_TIMES, storedDriveTimes);
+  mischerDriveHalfSeconds = decodeMischerDriveTimes(storedDriveTimes);
   gasStorageReady = gasStorage.begin("gas-meter", false);
   if (gasStorageReady) {
     gasDayBase = gasStorage.getDouble("base", NAN);
@@ -316,12 +327,37 @@ void setup() {
     float recovery = 0;
     if (hasRecovery) {
       const String text = request->getParam("restwaerme", true)->value();
-      char* end = nullptr;
-      recovery = strtof(text.c_str(), &end);
-      if (text.length() > 16 || end == text.c_str() || *end != '\0' ||
-          !isfinite(recovery) || recovery < 30 || recovery > 40) {
+      if (!parseRecoveryTarget(text.c_str(), recovery)) {
         request->send(400, "text/plain", "Ungueltige Restwaerme-Zieltemperatur (30 bis 40 Grad)"); return;
       }
+    }
+    const bool hasMischerIntervals = request->hasParam("mischerMin", true) ||
+                                    request->hasParam("mischerMax", true);
+    MischerIntervals intervals = {};
+    if (hasMischerIntervals) {
+      int minimum = 0, maximum = 0;
+      if (!request->hasParam("mischerMin", true) || !request->hasParam("mischerMax", true) ||
+          !parseMischerInterval(request->getParam("mischerMin", true)->value().c_str(), minimum) ||
+          !parseMischerInterval(request->getParam("mischerMax", true)->value().c_str(), maximum) ||
+          !validMischerIntervals(minimum, maximum)) {
+        request->send(400, "text/plain", "Mischerabstaende ungueltig: 5 bis 120 Sekunden, Minimum <= Maximum");
+        return;
+      }
+      intervals = {static_cast<uint8_t>(minimum), static_cast<uint8_t>(maximum)};
+    }
+    const bool hasDriveTimes = request->hasParam("mischerFahrtMin", true) ||
+                               request->hasParam("mischerFahrtMax", true);
+    MischerIntervals driveTimes = {};
+    if (hasDriveTimes) {
+      int minimum = 0, maximum = 0;
+      if (!request->hasParam("mischerFahrtMin", true) || !request->hasParam("mischerFahrtMax", true) ||
+          !parseMischerDriveTime(request->getParam("mischerFahrtMin", true)->value().c_str(), minimum) ||
+          !parseMischerDriveTime(request->getParam("mischerFahrtMax", true)->value().c_str(), maximum) ||
+          !validMischerDriveTimes(minimum, maximum)) {
+        request->send(400, "text/plain", "Mischerfahrzeiten ungueltig: 1 bis 10 Sekunden in 0.5er-Schritten, Minimum <= Maximum");
+        return;
+      }
+      driveTimes = {static_cast<uint8_t>(minimum), static_cast<uint8_t>(maximum)};
     }
     uint32_t id = 0;
     portENTER_CRITICAL(&roomSetpointMux);
@@ -332,7 +368,7 @@ void setup() {
       if (result.state != 1) {
         nextRoomSaveId = id = candidate;
         result = {id, 1};
-        requestedFlowLimit = {true, value, id, hasCurve, curve, hasRecovery, recovery};
+        requestedFlowLimit = {true, value, id, hasCurve, curve, hasRecovery, recovery, hasMischerIntervals, intervals, hasDriveTimes, driveTimes};
       }
     }
     portEXIT_CRITICAL(&roomSetpointMux);

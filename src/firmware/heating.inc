@@ -152,9 +152,22 @@ void regulateMischerToTarget(float target) {
   // Do not finish an opening pulse if a new reading already calls for closing.
   if (mischerPulseActive && ((MischerAufRelais && error < 0) ||
                             (MischerZuRelais && error > 0))) MischerStop();
-  if (mischer_wait == 0) {
-    mischer_wait = MISCHER_WAIT;
-    startRegulatedMischerPulse(error > 0);
+  int interval = MISCHER_WAIT;
+  uint8_t driveHalfSeconds = 2 * MISCHER_DRIVE;
+  if (!offHeatRecoveryActive) {
+    constexpr float nearTarget = 2.0f;
+    constexpr float farFromTarget = 8.0f;
+    const float fraction = fminf(1.0f, fmaxf(0.0f, (fabsf(error) - nearTarget) /
+                                             (farFromTarget - nearTarget)));
+    interval = mischerIntervals.maximum -
+        static_cast<int>(fraction * (mischerIntervals.maximum - mischerIntervals.minimum));
+    driveHalfSeconds = mischerDriveHalfSeconds.minimum +
+        static_cast<int>(fraction * (mischerDriveHalfSeconds.maximum - mischerDriveHalfSeconds.minimum));
+  }
+  if (!mischerPulseActive && mischer_wait <= MISCHER_OPEN_INTERVAL_MAX - interval) {
+    // Rest heat retains its start-to-start interval. Normal rest starts at MischerStop().
+    mischer_wait = offHeatRecoveryActive ? MISCHER_OPEN_INTERVAL_MAX : 0;
+    startRegulatedMischerPulse(error > 0, driveHalfSeconds);
   }
 }
 

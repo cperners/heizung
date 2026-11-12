@@ -23,16 +23,18 @@ using byte=uint8_t;
 #define MISCHER_AUS_KESSEL_MAX_TEMP 35.0f
 #define MISCHER_AUS_ZUFAHRT_MINUTEN 2UL
 #define MISCHER_WAIT 30
+#define MISCHER_OPEN_INTERVAL_MAX 120
+struct MischerIntervals { uint8_t minimum, maximum; };
+MischerIntervals mischerIntervals={15,30},mischerDriveHalfSeconds={4,20};
 #define MISCHER_DRIVE 5
 #define MISCHER_RUHEZONE_GRAD 0.5f
-constexpr uint32_t MISCHER_PULSE_MS = 5000;
 constexpr int BrennerPin=16,HeizungPin=4,BoilerPin=5,MischerAuf_Pin=18,MischerZu_Pin=2;
 int pins[64]={};void digitalWrite(int p,int v){pins[p]=v;}
 void writeRelayOutput(uint8_t p,uint8_t v){digitalWrite(p,v);}int digitalRead(int p){return pins[p];}
 unsigned long now=0;unsigned long millis(){return now;}
 bool valid[5]={true,true,true,true,true};bool sensorIsUsable(byte i){return i<5 && valid[i];}
 bool UrlaubBetrieb=false,WinterBetrieb=true,BoilerBetrieb=false,NurHeizung=false;
-bool mischerPulseActive=false;uint32_t mischerPulseStarted=0;
+bool mischerPulseActive=false;uint32_t mischerPulseStarted=0,mischerPulseDurationMs=0;bool mischerPulseUsesRest=false;
 bool offHeatRecoveryActive=false,RoomHeizen=true,BoilerHeizen=true,KesselHeizen=true;
 bool BrennerRelais=true,HeizungsRelais=false,BoilerRelais=false;
 bool MischerAufRelais=false,MischerZuRelais=false,RoomAnforderung=false,BoilerAnforderung=false,BoilerAufheizen=false;
@@ -47,7 +49,7 @@ struct Logger{template<class... T>void printf(T...){}template<class T>void print
 void delay(int){}
 void MischerStop();void MischerAuf();void MischerZu();void SetOutPin();
 bool heatingPumpSensorFault();bool boilerPumpSensorFault();bool enforceVorlaufSensorLock();
-void runOffHeatRecovery();void regulateMischerToTarget(float);void startRegulatedMischerPulse(bool);
+void runOffHeatRecovery();void regulateMischerToTarget(float);void startRegulatedMischerPulse(bool,uint8_t);
 '''
 # Include real state declarations for off mode and fault run-on.
 a=mix.index('bool vorlaufFaultOpening');b=mix.index('void updateMischerOffMode()',a)
@@ -77,7 +79,7 @@ int main(){
  assert(AussentemperaturRegelung==0 && heizkurveGueltig && vorlaufTemperatur>22.5 && vorlaufTemperatur<=40);
  assert(pins[MischerAuf_Pin]==HIGH && pins[MischerZu_Pin]==LOW && !mischer_init_laeuft);
  // Normal pulse ends after the independent one-second countdown ticks.
- now+=5000;mischer_wait=25;offLoop();assert(!pins[MischerAuf_Pin] && !pins[MischerZu_Pin]);
+ now+=5000;mischer_wait=115;offLoop();assert(!pins[MischerAuf_Pin] && !pins[MischerZu_Pin]);
  tVorlauf=45;mischer_wait=0;offLoop();assert(pins[MischerZu_Pin] && !pins[MischerAuf_Pin]);
  // Cold outside still cannot raise the target above the configured maximum.
  tAussen=-50;offLoop();assert(vorlaufTemperatur<=tvmax);

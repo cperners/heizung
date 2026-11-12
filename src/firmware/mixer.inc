@@ -222,15 +222,16 @@ static_assert(MISCHER_DRIVE > 0 && MISCHER_DRIVE <= 0xFFFFFFFFUL / 1000UL,
               "Ungueltige normale Mischer-Fahrzeit");
 static_assert(MISCHER_RUHEZONE_GRAD >= 0.0f && MISCHER_RUHEZONE_GRAD <= 10.0f,
               "Ungueltige Mischer-Ruhezone");
-constexpr uint32_t MISCHER_PULSE_MS = MISCHER_DRIVE * 1000UL;
 
-void startRegulatedMischerPulse(bool opening) {
+void startRegulatedMischerPulse(bool opening, uint8_t halfSeconds) {
   if (enforceVorlaufSensorLock()) return;
   if (opening) MischerAuf();
   else MischerZu();
   mischerPulseStarted = static_cast<uint32_t>(millis());
   mischerPulseActive = true;
-  mischer_drive = MISCHER_DRIVE;
+  mischerPulseDurationMs = halfSeconds * 500UL;
+  mischerPulseUsesRest = !offHeatRecoveryActive;
+  mischer_drive = (halfSeconds + 1) / 2;
 }
 
 void serviceRegulatedMischerPulse() {
@@ -238,7 +239,7 @@ void serviceRegulatedMischerPulse() {
   const bool needsMixer = offHeatRecoveryActive ||
       (!UrlaubBetrieb && (WinterBetrieb || NurHeizung) && HeizungsRelais);
   if (!needsMixer ||
-      static_cast<uint32_t>(static_cast<uint32_t>(millis()) - mischerPulseStarted) >= MISCHER_PULSE_MS) {
+      static_cast<uint32_t>(static_cast<uint32_t>(millis()) - mischerPulseStarted) >= mischerPulseDurationMs) {
     MischerStop();
   }
 }
@@ -304,6 +305,10 @@ void MischerZu(){
 }
 //#################################################################################################################################
 void MischerStop(){
+  if (mischerPulseActive && mischerPulseUsesRest) {
+    // The first tick can arrive immediately. One extra tick guarantees the selected rest time.
+    mischer_wait = MISCHER_OPEN_INTERVAL_MAX + 1;
+  }
   mischerPulseActive = false;
   mischer_drive = 0;
   // Normal regulation must not interrupt the explicitly requested fault run.

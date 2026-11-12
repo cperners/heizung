@@ -16,6 +16,9 @@ using std::isfinite;using byte=uint8_t;
 #define HIGH 1
 #define LOW 0
 #define MISCHER_WAIT 30
+#define MISCHER_OPEN_INTERVAL_MAX 120
+struct MischerIntervals { uint8_t minimum, maximum; };
+MischerIntervals mischerIntervals={15,30},mischerDriveHalfSeconds={4,20};
 #define MISCHER_DRIVE 5
 #define MISCHER_RUHEZONE_GRAD 0.5f
 #define MISCHER_AUS_KESSEL_MAX_TEMP 35.f
@@ -30,7 +33,7 @@ bool valid[5]={true,true,true,true,true};bool sensorIsUsable(int i){return valid
 bool UrlaubBetrieb=false,WinterBetrieb=true,BoilerBetrieb=false,NurHeizung=false;
 bool HeizungsRelais=true;
 bool offHeatRecoveryActive=false,BrennerRelais=false,MischerAufRelais=false,MischerZuRelais=false;
-bool mischerPulseActive=false;uint32_t mischerPulseStarted=0;
+bool mischerPulseActive=false;uint32_t mischerPulseStarted=0,mischerPulseDurationMs=0;bool mischerPulseUsesRest=false;
 bool mischer_init_laeuft=false,mischer_init_auf=true,mischer_init_zu=true;
 unsigned long previousTime_MischerInit=0,mischer_init_time_auf=10000,mischer_init_time_zu=6000;
 int mischer_wait=0,mischer_drive=0,AussentemperaturRegelung=1;
@@ -44,17 +47,48 @@ void reset(){
  valid[0]=valid[1]=true;WinterBetrieb=true;BoilerBetrieb=NurHeizung=UrlaubBetrieb=false;
  updateMischerOffMode();updateMischerBoilerMode();enforceVorlaufSensorLock();MischerStop();
  now=1000;HeizungsRelais=true;tKessel=60;tVorlauf=25;AussentemperaturRegelung=1;offHeatRecoveryActive=false;
- mischer_wait=mischer_drive=0;mischer_init_laeuft=false;mischer_init_auf=mischer_init_zu=true;
+ mischerIntervals={15,30};mischerDriveHalfSeconds={4,20};mischer_wait=mischer_drive=0;mischer_init_laeuft=false;mischer_init_auf=mischer_init_zu=true;
 }
 int main(){
+
+ // The maximum pulse ends before the adaptive rest starts.
+ reset();tVorlauf=20;regulateMischerToTarget(30);
+ now+=9999;serviceRegulatedMischerPulse();assert(pins[MischerAuf_Pin]);
+ ++now;serviceRegulatedMischerPulse();assert(!pins[MischerAuf_Pin] && mischer_wait==121);
+ mischer_wait=106;regulateMischerToTarget(30);assert(!pins[MischerAuf_Pin]);
+ mischer_wait=105;regulateMischerToTarget(30);assert(pins[MischerAuf_Pin]);
+ // A fresh reading close to target extends the current wait again.
+ now+=10000;serviceRegulatedMischerPulse();
+ mischer_wait=105;tVorlauf=29;regulateMischerToTarget(30);assert(!pins[MischerAuf_Pin]);
+ mischer_wait=0;regulateMischerToTarget(30);assert(pins[MischerAuf_Pin]);
+ // Medium deviation uses an intermediate interval.
+ reset();tVorlauf=25;mischer_wait=98;regulateMischerToTarget(30);assert(!pins[MischerAuf_Pin]);
+ mischer_wait=97;regulateMischerToTarget(30);assert(pins[MischerAuf_Pin]);
+ // Persisted custom intervals can be longer than the previous fixed limit.
+ reset();mischerIntervals={20,60};tVorlauf=29;mischer_wait=61;
+ regulateMischerToTarget(30);assert(!pins[MischerAuf_Pin]);
+ mischer_wait=60;regulateMischerToTarget(30);assert(pins[MischerAuf_Pin]);
+ // Both directions use the same maximum duration and minimum rest.
+ reset();tVorlauf=39;mischer_wait=106;regulateMischerToTarget(30);assert(!pins[MischerZu_Pin]);
+ mischer_wait=105;regulateMischerToTarget(30);assert(pins[MischerZu_Pin] && mischerPulseDurationMs==10000);
+ now+=10000;serviceRegulatedMischerPulse();assert(!pins[MischerZu_Pin] && mischer_wait==121);
+ // Near the target the minimum duration applies.
+ reset();tVorlauf=29;regulateMischerToTarget(30);assert(pins[MischerAuf_Pin] && mischerPulseDurationMs==2000);
+ now+=2000;serviceRegulatedMischerPulse();assert(!pins[MischerAuf_Pin] && mischer_wait==121);
+ // A half-second setting reaches the relay deadline without rounding.
+ reset();mischerDriveHalfSeconds={5,19};tVorlauf=29;regulateMischerToTarget(30);
+ now+=2499;serviceRegulatedMischerPulse();assert(pins[MischerAuf_Pin]);
+ ++now;serviceRegulatedMischerPulse();assert(!pins[MischerAuf_Pin]);
+ // Rest heat keeps its previous timing.
+ reset();offHeatRecoveryActive=true;tVorlauf=20;mischer_wait=105;regulateMischerToTarget(30);assert(!pins[MischerAuf_Pin]);
  reset();regulateMischerToTarget(30);assert(pins[MischerAuf_Pin] && mischerPulseActive);
- now=5999;serviceRegulatedMischerPulse();assert(pins[MischerAuf_Pin]);
- now=6000;serviceRegulatedMischerPulse();assert(!pins[MischerAuf_Pin] && !mischerPulseActive);
+ now=6999;serviceRegulatedMischerPulse();assert(pins[MischerAuf_Pin]);
+ now=7000;serviceRegulatedMischerPulse();assert(!pins[MischerAuf_Pin] && !mischerPulseActive);
  // An inactive heating circuit stops immediately, without another regulator call.
  reset();regulateMischerToTarget(30);AussentemperaturRegelung=0;HeizungsRelais=false;serviceRegulatedMischerPulse();assert(!pins[MischerAuf_Pin]);
  // Combined room control may keep a pulse while its heating pump is active.
  reset();AussentemperaturRegelung=0;regulateMischerToTarget(30);serviceRegulatedMischerPulse();assert(pins[MischerAuf_Pin]);
- now+=5000;serviceRegulatedMischerPulse();assert(!pins[MischerAuf_Pin]);
+ now+=6000;serviceRegulatedMischerPulse();assert(!pins[MischerAuf_Pin]);
  // Rest heat keeps curve control even with normal RAUM selected.
  reset();offHeatRecoveryActive=true;AussentemperaturRegelung=0;regulateMischerToTarget(30);
  serviceRegulatedMischerPulse();assert(pins[MischerAuf_Pin]);now+=5000;serviceRegulatedMischerPulse();assert(!pins[MischerAuf_Pin]);
@@ -65,9 +99,9 @@ int main(){
  tVorlauf=30.2f;regulateMischerToTarget(30);assert(!pins[MischerZu_Pin]);
  reset();regulateMischerToTarget(30);tVorlauf=31;regulateMischerToTarget(30);assert(!pins[MischerAuf_Pin] && !pins[MischerZu_Pin]);
  // 32-bit millisecond wraparound still gives exactly the normal duration.
- reset();now=0xfffffff0U;regulateMischerToTarget(30);now+=4999;serviceRegulatedMischerPulse();assert(pins[MischerAuf_Pin]);
+ reset();now=0xfffffff0U;regulateMischerToTarget(30);now+=5999;serviceRegulatedMischerPulse();assert(pins[MischerAuf_Pin]);
  ++now;serviceRegulatedMischerPulse();assert(!pins[MischerAuf_Pin]);
- // Initialization is deliberately longer than a normal five-second pulse.
+ // Initialization is deliberately longer than a normal pulse.
  reset();mischer_init_auf=mischer_init_zu=false;MischerInit();assert(pins[MischerAuf_Pin] && !mischerPulseActive);
  now+=6000;serviceRegulatedMischerPulse();assert(pins[MischerAuf_Pin]);
  // Direct special movements take ownership from an earlier normal pulse.

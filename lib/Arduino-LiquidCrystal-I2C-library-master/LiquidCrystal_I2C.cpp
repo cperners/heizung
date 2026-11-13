@@ -32,7 +32,8 @@ LiquidCrystal_I2C::LiquidCrystal_I2C(uint8_t lcd_addr, uint8_t lcd_cols, uint8_t
 }
 
 void LiquidCrystal_I2C::begin() {
-	//(chris habe schon in main definiert)Wire.begin();
+	// The application initializes the shared I2C bus before probing devices.
+	// Wire.begin();
 	_displayfunction = LCD_4BITMODE | LCD_1LINE | LCD_5x8DOTS;
 
 	if (_rows > 1) {
@@ -192,6 +193,10 @@ void LiquidCrystal_I2C::backlight(void) {
 	_backlightval=LCD_BACKLIGHT;
 	expanderWrite(0);
 }
+bool LiquidCrystal_I2C::getBacklight() {
+  return _backlightval == LCD_BACKLIGHT;
+}
+
 
 /*********** mid level commands, for sending data/cmds */
 

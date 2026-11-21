@@ -134,6 +134,19 @@ int main(){
  valid[3]=true;mischer_init_auf=mischer_init_zu=true;
  chckRoom(true);assert(pins[HeizungPin] && pins[MischerAuf_Pin]);
  tRoom=tmyRoomdest;chckRoom(true);assert(!pins[HeizungPin] && !pins[MischerAuf_Pin]);
+ // Boiler-only clears a previous heating demand on the first output pass.
+ reset();WinterBetrieb=true;HeizungsRelais=true;RoomAnforderung=true;
+ SetOutPin();assert(pins[HeizungPin]);
+ WinterBetrieb=false;BoilerBetrieb=true;
+ SetOutPin();assert(!pins[HeizungPin] && !HeizungsRelais && !RoomAnforderung);
+ for(int i=0;i<5;++i){SetOutPin();assert(!pins[HeizungPin]);}
+ // The separate pump-protection movement and bounded fault run-on still apply.
+ Pumpenloesen=1;SetOutPin();assert(pins[HeizungPin]);
+ Pumpenloesen=0;SetOutPin();assert(!pins[HeizungPin]);
+ WinterBetrieb=true;HeizungsRelais=true;SetOutPin();assert(pins[HeizungPin]);
+ valid[0]=false;WinterBetrieb=false;BoilerBetrieb=true;
+ SetOutPin();assert(pins[HeizungPin]);
+ now+=600000;SetOutPin();assert(!pins[HeizungPin]);
  // Non-finite boiler temperature is never considered cooled.
  reset();valid[0]=false;tKessel=std::numeric_limits<float>::quiet_NaN();offLoop();
  assert(offHeatRecoveryActive && !pins[HeizungPin] && !pins[MischerZu_Pin]);

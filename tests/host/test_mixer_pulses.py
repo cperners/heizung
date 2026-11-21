@@ -115,6 +115,12 @@ int main(){
  now+=6000;serviceRegulatedMischerPulse();assert(pins[MischerZu_Pin]);
  reset();WinterBetrieb=false;BoilerBetrieb=true;updateMischerBoilerMode();assert(pins[MischerZu_Pin] && !mischerPulseActive);
  now+=6000;serviceRegulatedMischerPulse();assert(pins[MischerZu_Pin]);
+ // Boiler closing stops at two minutes and stays stopped until the one-time check.
+ now+=114000;updateMischerBoilerMode();assert(!pins[MischerZu_Pin] && !pins[MischerAuf_Pin]);
+ now+=599999;updateMischerBoilerMode();assert(!pins[MischerZu_Pin]);
+ ++now;updateMischerBoilerMode();assert(pins[MischerZu_Pin]);
+ now+=120000;updateMischerBoilerMode();assert(!pins[MischerZu_Pin]);
+ now+=1200000;updateMischerBoilerMode();assert(!pins[MischerZu_Pin]);
 }
 '''
 with tempfile.TemporaryDirectory() as d:

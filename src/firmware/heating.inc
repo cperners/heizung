@@ -41,6 +41,10 @@ void Automatik(){
 ******************************************************************************************************* */
 void Boilerbetrieb(){
   RoomHeizen=false;
+  RoomAnforderung=false;
+  HeizungsRelais=false;
+  heizkurveGueltig=false;
+  vorlaufTemperatur=0.0f;
   KesselHeizen=true;
   BoilerHeizen=true;
   tmyRoomdest=0.0;
@@ -298,6 +302,10 @@ bool pumpOutputWithFault(PumpFaultState& state, bool fault, bool requested,
 }
 
 void SetOutPin(){
+  if (!UrlaubBetrieb && !WinterBetrieb && BoilerBetrieb) {
+    HeizungsRelais = false;
+    RoomAnforderung = false;
+  }
   if (!UrlaubBetrieb && !WinterBetrieb && !BoilerBetrieb && !NurHeizung) {
     BrennerRelais = false;
     writeRelayOutput(BrennerPin, LOW);
